@@ -9,13 +9,13 @@ evidence or argument behind it, and what would change the decision. Dated 2026-0
 embedding of a few photos of a chosen target person. The old `maximize=True` "move away from own
 embedding" mode is removed.
 
-**Evidence.** The Fawkes paper (Shan et al., USENIX Security 2020) defines the method as target
+**Evidence.** The [Fawkes paper](https://www.usenix.org/system/files/sec20-shan.pdf) (Shan et al., USENIX Security 2020) defines the method as target
 mimicking: every photo of a user is pushed toward the *same* wrong identity so that a model trained
 on them learns a consistent wrong class. The released code switched to an untargeted objective that
 sends each photo in whichever direction its own gradient points, so a trained model sees a diffuse
 class rather than a wrong one and still generalises to the clean face. Untargeted perturbations are
 also known to transfer worse between models than targeted ones because they exploit local quirks
-of the surrogate. LowKey (Cherepanova et al., ICLR 2021), which uses a coherent objective plus an
+of the surrogate. [LowKey](https://arxiv.org/abs/2101.07922) (Cherepanova et al., ICLR 2021), which uses a coherent objective plus an
 ensemble, kept Amazon Rekognition at 2.4 percent rank-50 recognition where Fawkes left 77.5 percent
 rank-1.
 
@@ -27,12 +27,12 @@ rank-1.
 and training set (Glint360K, WebFace12M): ArcFace IR-100, AdaFace IR-101, LVFace-B. Evaluators used
 to measure protection are kept disjoint from the ensemble.
 
-**Evidence.** Radiya-Dixit and Tramer ("Data Poisoning Won't Save You From Facial Recognition",
+**Evidence.** Radiya-Dixit and Tramer (["Data Poisoning Won't Save You From Facial Recognition"](https://arxiv.org/abs/2106.14851),
 ICLR 2022) show that cloaks are fixed at publication time and must defeat all future models; a
 model trained after the cloaking tool is released, or trained robustly against it, breaks Fawkes
 and LowKey. The old extractors are 2020 models trained on pre-2020 data. The transfer literature
 consistently finds that ensembling raises black-box transfer (up to about 31 percent in the
-EOLT study, arXiv 2512.07228) and that architectural diversity matters more than ensemble size. No
+[EOLT study](https://arxiv.org/abs/2512.07228), arXiv 2512.07228) and that architectural diversity matters more than ensemble size. No
 published work benchmarks Fawkes against AdaFace-IR101 or LVFace class models, so the harness in
 `eval/` produces that number. The old extractors remain available for the "before" column only.
 
@@ -49,7 +49,7 @@ warped into the 112 px template *differentiably* inside the loss, with random la
 raw box, then pads it into a mean-coloured square. Every ArcFace-family model, including the
 adversary's, expects the aligned template, so the old cloak was optimised in a frame the adversary
 never sees and gets resampled by an arbitrary similarity transform before it reaches them. The
-"Unlearnable Faces" paper (LPID, arXiv 2607.05996, 2026) models the attacker's crop-and-resize
+["Unlearnable Faces" paper](https://arxiv.org/abs/2607.05996) (LPID, arXiv 2607.05996, 2026) models the attacker's crop-and-resize
 pipeline differentiably and reports the lowest attacker accuracy of any method, which is direct
 evidence that perturbing in the right frame is a first-order effect. Optimising in photo
 coordinates also removes the inverse warp that would resample the cloak a second time on output.
@@ -60,8 +60,8 @@ coordinates also removes the inverse warp that would resample the cloak a second
 JPEG-approximated copies (two samples per step; off in `low` mode).
 
 **Evidence.** LowKey's differentiable blur in the loop is one of the two changes credited with its
-large gain over Fawkes. Several follow-ups report JPEG and Gaussian noise degrading Fawkes cloaks.
-The EOLT study evaluated 30 transformations and found blur is the bottleneck that must be included
+large gain over Fawkes. Several follow-ups report JPEG and Gaussian noise degrading Fawkes cloaks (e.g. the Florida Tech thesis ["An Assessment of Image-Cloaking Techniques"](https://repository.fit.edu/cgi/viewcontent.cgi?article=1793&context=etd)).
+The [EOLT study](https://arxiv.org/abs/2512.07228) evaluated 30 transformations and found blur is the bottleneck that must be included
 while hue augmentation overfits and *reduces* transfer. Social platforms re-encode uploads as JPEG.
 
 ## 5. PyTorch replaces TensorFlow
@@ -69,10 +69,10 @@ while hue augmentation overfits and *reduces* transfer. Social platforms re-enco
 **Decision.** The optimiser, surrogates and evaluators run on PyTorch (CPU wheel). TensorFlow, Keras
 and `mtcnn` are dropped.
 
-**Evidence.** Every strong open recogniser ships as PyTorch weights (insightface `arcface_torch`,
-AdaFace, CVLface, LVFace, MagFace, TopoFR). The only live route into TensorFlow is `onnx2tf` on
+**Evidence.** Every strong open recogniser ships as PyTorch weights ([insightface `arcface_torch`](https://github.com/deepinsight/insightface/tree/master/recognition/arcface_torch),
+[AdaFace](https://github.com/mk-minchul/AdaFace), [CVLface](https://github.com/mk-minchul/CVLface), [LVFace](https://github.com/bytedance/LVFace), [MagFace](https://github.com/IrvingMeng/MagFace), [TopoFR](https://github.com/DanJun6737/TopoFR)). The only live route into TensorFlow is [`onnx2tf`](https://github.com/PINTO0309/onnx2tf) on
 ONNX exports, which is plausible for plain ResNets but unproven for ViTs and needs per-model
-numeric and gradient validation; `onnx-tf` is dead (pins TF 2.8) and `nobuco` is Keras 2 only. The
+numeric and gradient validation; [`onnx-tf`](https://github.com/onnx/onnx-tensorflow) is dead (pins TF 2.8) and [`nobuco`](https://github.com/AlexanderLutsenko/nobuco) is Keras 2 only. The
 existing 2020 extractors need a hand-written loader to work on Keras 3 at all. The torch CPU wheel
 is about 190 MB versus about 600 MB for TensorFlow, so the install gets smaller.
 
@@ -83,12 +83,12 @@ PyTorch has no retrace cost and the control loop stays on-device.
 ## 6. InsightFace SCRFD for detection and alignment
 
 **Decision.** `insightface` with `onnxruntime` provides detection and the five landmarks;
-alignment uses the exact template points from `insightface/utils/face_align.py`.
+alignment uses the exact template points from [`insightface/utils/face_align.py`](https://github.com/deepinsight/insightface/blob/master/python-package/insightface/utils/face_align.py).
 
 **Evidence.** It is the reference implementation most adversaries would use, so our alignment
 matches theirs. Its ONNX recognisers (`w600k_r50`, `glintr100`) double as forward-only held-out
-evaluators. `mtcnn` 1.0 does return keypoints but depends on TensorFlow; `facenet-pytorch` pins
-`torch<2.3`; MediaPipe returns a mouth centre rather than corners and cannot feed the template.
+evaluators. [`mtcnn` 1.0](https://pypi.org/project/mtcnn/) does return keypoints but depends on TensorFlow; [`facenet-pytorch`](https://pypi.org/project/facenet-pytorch/) pins
+`torch<2.3`; [MediaPipe](https://github.com/google-ai-edge/mediapipe/blob/master/docs/solutions/face_detection.md) returns a mouth centre rather than corners and cannot feed the template.
 
 ## 7. Projected optimiser with early stopping instead of the penalty scheduler
 
@@ -120,8 +120,8 @@ probe on embeddings from recognisers *not* in the surrogate ensemble, and report
 rate on clean test photos, with and without JPEG re-encoding.
 
 **Evidence.** Radiya-Dixit and Tramer's central point is that evaluating against the surrogate is
-meaningless; only transfer to unseen models matters. LFW is downloadable without credentials via
-scikit-learn, so the number is reproducible by anyone. A linear probe on frozen embeddings is how
+meaningless; only transfer to unseen models matters. [LFW](http://vis-www.cs.umass.edu/lfw/) is downloadable without credentials via
+[scikit-learn](https://scikit-learn.org/stable/modules/generated/sklearn.datasets.fetch_lfw_people.html), so the number is reproducible by anyone. A linear probe on frozen embeddings is how
 a low-effort adversary would actually build a recogniser from scraped photos.
 
 ## Known limits, stated plainly
@@ -130,3 +130,30 @@ a low-effort adversary would actually build a recogniser from scraped photos.
   (Radiya-Dixit and Tramer). The harness measures transfer to today's models, nothing more.
 - Most of the strongest weights are research-only; Fawkes states the same use.
 - CPU cost per face rises with modern surrogates; `low` mode exists for that reason.
+
+## Sources
+
+Papers
+- Shan et al., *Fawkes: Protecting Personal Privacy against Unauthorized Deep Learning Models*, USENIX Security 2020. https://www.usenix.org/system/files/sec20-shan.pdf
+- Cherepanova et al., *LowKey: Leveraging Adversarial Attacks to Protect Social Media Users from Facial Recognition*, ICLR 2021. https://arxiv.org/abs/2101.07922
+- Radiya-Dixit, Hong, Carlini, Tramer, *Data Poisoning Won't Save You From Facial Recognition*, ICLR 2022. https://arxiv.org/abs/2106.14851
+- Oh, Park, Lee, *Unlearnable Faces: Privacy Protection Surviving Extraction Pipeline* (LPID), 2026. https://arxiv.org/abs/2607.05996
+- *Robust Protective Perturbation* / EOLT transformation study, 2025. https://arxiv.org/abs/2512.07228
+- Kim et al., *AdaFace: Quality Adaptive Margin for Face Recognition*, CVPR 2022. https://arxiv.org/abs/2204.00964
+- You et al., *LVFace: Progressive Cluster Optimization for Large Vision Models in Face Recognition*, ICCV 2025. https://openaccess.thecvf.com/content/ICCV2025/papers/You_LVFace_Progressive_Cluster_Optimization_for_Large_Vision_Models_in_Face_ICCV_2025_paper.pdf
+- Deng et al., *ArcFace: Additive Angular Margin Loss for Deep Face Recognition*, CVPR 2019. https://arxiv.org/abs/1801.07698
+- Guo et al., *Sample and Computation Redistribution for Efficient Face Detection* (SCRFD), ICLR 2022. https://arxiv.org/abs/2105.04714
+- Sun et al., *Transferable Adversarial Facial Images for Privacy Protection*, ACM MM 2024. https://arxiv.org/abs/2408.01428
+- Radiya-Dixit's result is also discussed in *An Assessment of Image-Cloaking Techniques* (Florida Tech thesis). https://repository.fit.edu/cgi/viewcontent.cgi?article=1793&context=etd
+
+Code and weights
+- InsightFace model zoo and packs: https://github.com/deepinsight/insightface/blob/master/python-package/docs/model_zoo.md ; ONNX mirror https://huggingface.co/public-data/insightface
+- InsightFace `arcface_torch` backbones: https://github.com/deepinsight/insightface/tree/master/recognition/arcface_torch
+- Alignment template: https://github.com/deepinsight/insightface/blob/master/python-package/insightface/utils/face_align.py
+- CVLface hub (AdaFace / ArcFace IR-101, ViT): https://github.com/mk-minchul/CVLface ; https://huggingface.co/minchul/cvlface_adaface_ir101_webface12m
+- LVFace: https://github.com/bytedance/LVFace ; https://huggingface.co/bytedance-research/LVFace
+- MagFace (Apache-2.0): https://github.com/IrvingMeng/MagFace
+- onnx2tf: https://github.com/PINTO0309/onnx2tf ; onnx-tensorflow (unmaintained): https://github.com/onnx/onnx-tensorflow ; nobuco (Keras 2 only): https://github.com/AlexanderLutsenko/nobuco
+- Keras 3 legacy HDF5 incompatibility: https://github.com/keras-team/keras/issues/20083
+- PyTorch CPU wheels: https://download.pytorch.org/whl/cpu
+- LFW via scikit-learn: https://scikit-learn.org/stable/modules/generated/sklearn.datasets.fetch_lfw_people.html
