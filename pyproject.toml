@@ -10,7 +10,7 @@ readme = "README.md"
 license = { text = "BSD" }
 authors = [{ name = "Shawn Shan", email = "shawnshan@cs.uchicago.edu" }]
 keywords = ["fawkes", "privacy", "ML"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Operating System :: OS Independent",
@@ -18,10 +18,20 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.26",
+    "pillow>=10.0",
+    "torch>=2.4",
+    "insightface>=0.7",
+    "onnxruntime>=1.18",
+    "opencv-python-headless>=4.9",
+    "huggingface_hub>=0.23",
+    "safetensors>=0.4",
+    # transitional: the TF pipeline stays until the torch pipeline replaces it
     "tensorflow>=2.16",
     "mtcnn>=1.0",
-    "pillow>=10.0",
 ]
+
+[project.optional-dependencies]
+eval = ["scikit-learn>=1.4"]
 
 [project.urls]
 Homepage = "https://github.com/Shawn-Shan/fawkes"
@@ -34,6 +44,17 @@ packages = ["fawkes"]
 
 [tool.setuptools.dynamic]
 version = { attr = "fawkes.__version__" }
+
+[tool.uv]
+required-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [dependency-groups]
 dev = ["pytest"]
