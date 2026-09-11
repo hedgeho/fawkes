@@ -159,7 +159,9 @@ def get_ends(longsize, window):
 
 def resize(img, sz):
     assert np.min(img) >= 0 and np.max(img) <= 255.0
-    im_data = array_to_img(img).resize((sz[1], sz[0]))
+    # scale=False: the Keras default rescales the array to the full [0, 255] range, which
+    # contrast-stretches every crop and distorts the cloak that is later pasted back.
+    im_data = array_to_img(img, scale=False).resize((sz[1], sz[0]))
     im_data = img_to_array(im_data)
     return im_data
 
