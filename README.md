@@ -1,6 +1,7 @@
 Fawkes
 ------
-This is a maintained fork of Shawn-Shan/fawkes. Modern improvements to dependencies, quality and speed are made, bringing the latency down at least 12x.
+> [!NOTE]
+> This is a maintained fork of Shawn-Shan/fawkes. Modern improvements to dependencies, quality and speed are made, bringing the latency down at least 12x.
 
 
 Fawkes is a privacy protection system developed by researchers at [SANDLab](https://sandlab.cs.uchicago.edu/),
