@@ -34,16 +34,15 @@ Options:
 
 `fawkes -d ./imgs --mode low`
 
-or `python3 protection.py -d ./imgs --mode low`
+or `python3 -m fawkes -d ./imgs --mode low`
 
 
 ### Tips
 
 - The perturbation generation takes ~60 seconds per image on a CPU machine, and it would be much faster on a GPU
   machine. Use `batch-size=1` on CPU and `batch-size>1` on GPUs.
-- Run on GPU. The current Fawkes package and binary does not support GPU. To use GPU, you need to clone this repo, install
-  the required packages in `setup.py`, and replace tensorflow with tensorflow-gpu. Then you can run Fawkes
-  by `python3 fawkes/protection.py [args]`.
+- Run on GPU. On Linux the standard `tensorflow` wheel includes GPU support once the CUDA libraries are present;
+  the simplest way to get them is `pip install 'tensorflow[and-cuda]'`. Then run Fawkes as usual and pass `-g <gpu id>`.
 
 ![](http://sandlab.cs.uchicago.edu/fawkes/files/obama.png)
 
@@ -61,6 +60,14 @@ pip install fawkes
 ```
 
 If you don't have root privilege, please try to install on user namespace: `pip install --user fawkes`.
+
+To install from a clone of this repository (Python 3.10 or newer):
+
+```
+pip install .
+```
+
+The two feature-extractor models (about 300 MB in total) are downloaded on first run.
 
 
 Academic Research Usage

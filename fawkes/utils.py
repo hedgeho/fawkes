@@ -5,7 +5,6 @@
 # @Link    : https://www.shawnshan.com/
 
 
-import errno
 import glob
 import gzip
 import hashlib
@@ -14,56 +13,24 @@ import os
 import pickle
 import random
 import shutil
-import sys
 import tarfile
 import zipfile
+from urllib.error import HTTPError, URLError
+from urllib.request import urlretrieve
 
 import PIL
-import pkg_resources
-import six
-from keras.utils import Progbar
-from six.moves.urllib.error import HTTPError, URLError
-
-stderr = sys.stderr
-sys.stderr = open(os.devnull, 'w')
 import keras
-
-sys.stderr = stderr
 import keras.backend as K
 import numpy as np
 import tensorflow as tf
 from PIL import Image, ExifTags
 from keras.layers import Dense, Activation
 from keras.models import Model
-from keras.preprocessing import image
+from keras.utils import Progbar, img_to_array, array_to_img, load_img
 
 from fawkes.align_face import align
-from six.moves.urllib.request import urlopen
 
-if sys.version_info[0] == 2:
-    def urlretrieve(url, filename, reporthook=None, data=None):
-        def chunk_read(response, chunk_size=8192, reporthook=None):
-            content_type = response.info().get('Content-Length')
-            total_size = -1
-            if content_type is not None:
-                total_size = int(content_type.strip())
-            count = 0
-            while True:
-                chunk = response.read(chunk_size)
-                count += 1
-                if reporthook is not None:
-                    reporthook(count, chunk_size, total_size)
-                if chunk:
-                    yield chunk
-                else:
-                    break
-
-        response = urlopen(url, data)
-        with open(filename, 'wb') as fd:
-            for chunk in chunk_read(response, reporthook=reporthook):
-                fd.write(chunk)
-else:
-    from six.moves.urllib.request import urlretrieve
+MODEL_URL_BASE = "https://mirror.cs.uchicago.edu/fawkes/files"
 
 
 def clip_img(X, preprocessing='raw'):
@@ -106,7 +73,7 @@ def load_image(path):
             else:
                 pass
     img = img.convert('RGB')
-    image_array = image.img_to_array(img)
+    image_array = img_to_array(img)
 
     return image_array
 
@@ -200,7 +167,7 @@ class Faces(object):
             self.cropped_faces = preprocess(self.cropped_faces, PREPROCESS)
 
         self.cloaked_cropped_faces = None
-        self.cloaked_faces = np.copy(self.org_faces)
+        self.cloaked_faces = [np.copy(f) for f in self.org_faces]
 
     def get_faces(self):
         return self.cropped_faces
@@ -209,7 +176,7 @@ class Faces(object):
         if self.no_align:
             return np.clip(protected_images, 0.0, 255.0), self.images_without_face
 
-        self.cloaked_faces = np.copy(self.org_faces)
+        self.cloaked_faces = [np.copy(f) for f in self.org_faces]
 
         for i in range(len(self.cropped_faces)):
             cur_protected = protected_images[i]
@@ -263,9 +230,8 @@ def load_victim_model(number_classes, teacher_model=None, end2end=False):
 
 def resize(img, sz):
     assert np.min(img) >= 0 and np.max(img) <= 255.0
-    from keras.preprocessing import image
-    im_data = image.array_to_img(img).resize((sz[1], sz[0]))
-    im_data = image.img_to_array(im_data)
+    im_data = array_to_img(img).resize((sz[1], sz[0]))
+    im_data = img_to_array(im_data)
     return im_data
 
 
@@ -427,16 +393,74 @@ def load_extractor(name):
     hash_map = {"extractor_2": "ce703d481db2b83513bbdafa27434703",
                 "extractor_0": "94854151fd9077997d69ceda107f9c6b"}
     assert name in ["extractor_2", 'extractor_0']
-    model_file = pkg_resources.resource_filename("fawkes", "model/{}.h5".format(name))
-    cur_hash = hash_map[name]
-    model_dir = pkg_resources.resource_filename("fawkes", "model/")
+    model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model")
     os.makedirs(model_dir, exist_ok=True)
-    get_file("{}.h5".format(name), "http://mirror.cs.uchicago.edu/fawkes/files/{}.h5".format(name),
-             cache_dir=model_dir, cache_subdir='', md5_hash=cur_hash)
+    model_file = get_file("{}.h5".format(name), "{}/{}.h5".format(MODEL_URL_BASE, name),
+                          cache_dir=model_dir, cache_subdir='', md5_hash=hash_map[name])
 
-    model = keras.models.load_model(model_file)
+    model = load_legacy_model(model_file)
     model = Extractor(model)
     return model
+
+
+def _sanitize_legacy_config(config):
+    """Strip Keras 2 layer arguments that Keras 3 no longer accepts (in place)."""
+    for layer_cfg in config.get("layers", []):
+        if layer_cfg["class_name"] in ("Functional", "Model"):
+            _sanitize_legacy_config(layer_cfg["config"])
+        elif layer_cfg["class_name"] == "DepthwiseConv2D":
+            layer_cfg["config"].pop("groups", None)
+
+
+def load_legacy_model(model_file):
+    """Load a Keras 2 HDF5 model whose top-level graph nests Functional sub-models.
+
+    Keras 3's legacy HDF5 loader assumes nested Functional models start with a
+    built-in inbound node (the Keras 2 convention), so the saved node index of 1
+    is out of range and loading fails. The top-level graph of the extractors is
+    a simple chain, so it is rebuilt here from the saved config and the weights
+    are then loaded topologically from the same file.
+    """
+    import h5py
+    with h5py.File(model_file, "r") as f:
+        config = json.loads(f.attrs["model_config"])["config"]
+
+    _sanitize_legacy_config(config)
+    tensors = {}
+    for layer_cfg in config["layers"]:
+        name = layer_cfg["name"]
+        if layer_cfg["class_name"] == "InputLayer":
+            shape = layer_cfg["config"]["batch_input_shape"][1:]
+            tensors[name] = keras.Input(shape=shape, name=name)
+            continue
+        if layer_cfg["class_name"] in ("Functional", "Model"):
+            layer = Model.from_config(layer_cfg["config"])
+        else:
+            layer = keras.layers.deserialize(layer_cfg)
+        inbound = [tensors[node[0]] for node in layer_cfg["inbound_nodes"][0]]
+        tensors[name] = layer(inbound[0] if len(inbound) == 1 else inbound)
+
+    inputs = [tensors[node[0]] for node in config["input_layers"]]
+    outputs = [tensors[node[0]] for node in config["output_layers"]]
+    model = Model(inputs[0] if len(inputs) == 1 else inputs,
+                  outputs[0] if len(outputs) == 1 else outputs, name=config["name"])
+    model.load_weights(model_file)
+    _refresh_normalization_layers(model)
+    return model
+
+
+def _refresh_normalization_layers(model):
+    """Re-read Normalization statistics from the loaded weights.
+
+    Keras 3's Normalization layer snapshots its mean and variance when it is
+    built, which happens before load_weights() runs, so the snapshot has to be
+    refreshed or the layer keeps normalizing with the initial zeros and ones.
+    """
+    for layer in model.layers:
+        if isinstance(layer, Model):
+            _refresh_normalization_layers(layer)
+        elif isinstance(layer, keras.layers.Normalization):
+            layer.finalize_state()
 
 
 class Extractor(object):
@@ -467,7 +491,7 @@ def get_dataset_path(dataset):
 
 
 def dump_image(x, filename, format="png", scale=False):
-    img = image.array_to_img(x, scale=scale)
+    img = array_to_img(x, scale=scale)
     img.save(filename, format)
     return
 
@@ -539,15 +563,14 @@ def select_target_label(imgs, feature_extractors_ls, feature_extractors_names, m
             continue
         try:
             get_file("{}.jpg".format(i),
-                     "http://mirror.cs.uchicago.edu/fawkes/files/target_data/{}/{}.jpg".format(target_data_id, i),
+                     "{}/target_data/{}/{}.jpg".format(MODEL_URL_BASE, target_data_id, i),
                      cache_dir=model_dir, cache_subdir='target_data/{}/'.format(target_data_id))
         except Exception:
             pass
 
     image_paths = glob.glob(image_dir + "/*.jpg")
 
-    target_images = [image.img_to_array(image.load_img(cur_path)) for cur_path in
-                     image_paths]
+    target_images = [img_to_array(load_img(cur_path)) for cur_path in image_paths]
 
     target_images = np.array([resize(x, (IMG_SIZE, IMG_SIZE)) for x in target_images])
     target_images = preprocess(target_images, PREPROCESS)
@@ -660,7 +683,7 @@ def _extract_archive(file_path, path='.', archive_format='auto'):
         return False
     if archive_format == 'auto':
         archive_format = ['tar', 'zip']
-    if isinstance(archive_format, six.string_types):
+    if isinstance(archive_format, str):
         archive_format = [archive_format]
 
     for archive_type in archive_format:
@@ -687,15 +710,7 @@ def _extract_archive(file_path, path='.', archive_format='auto'):
 
 
 def _makedirs_exist_ok(datadir):
-    if six.PY2:
-        # Python 2 doesn't have the exist_ok arg, so we try-except here.
-        try:
-            os.makedirs(datadir)
-        except OSError as e:
-            if e.errno != errno.EEXIST:
-                raise
-    else:
-        os.makedirs(datadir, exist_ok=True)  # pylint: disable=unexpected-keyword-arg
+    os.makedirs(datadir, exist_ok=True)
 
 
 def validate_file(fpath, file_hash, algorithm='auto', chunk_size=65535):
@@ -715,13 +730,13 @@ def validate_file(fpath, file_hash, algorithm='auto', chunk_size=65535):
     else:
         hasher = 'md5'
 
-    if str(_hash_file(fpath, hasher, chunk_size)) == str(file_hash):
+    if str(_hash_file(fpath, hasher, chunk_size, file_hash)) == str(file_hash):
         return True
     else:
         return False
 
 
-def _hash_file(fpath, algorithm='sha256', chunk_size=65535):
+def _hash_file(fpath, algorithm='sha256', chunk_size=65535, file_hash=''):
     """Calculates a file sha256 or md5 hash.
     Example:
     ```python
@@ -736,7 +751,7 @@ def _hash_file(fpath, algorithm='sha256', chunk_size=65535):
     Returns:
         The file hash
     """
-    if (algorithm == 'sha256') or (algorithm == 'auto' and len(hash) == 64):
+    if (algorithm == 'sha256') or (algorithm == 'auto' and len(file_hash) == 64):
         hasher = hashlib.sha256()
     else:
         hasher = hashlib.md5()

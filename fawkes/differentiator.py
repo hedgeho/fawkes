@@ -122,11 +122,6 @@ class FawkesMaskGeneration:
         if target_raw is not None:
             cur_timg_input = self.resize_tensor(target_raw, model_input_shape)
         for bottleneck_model in self.bottleneck_models:
-            if tape is not None:
-                try:
-                    tape.watch(bottleneck_model.model.variables)
-                except AttributeError:
-                    tape.watch(bottleneck_model.variables)
             # get the respective feature space reprs.
             bottleneck_a = bottleneck_model(cur_aimg_input)
             if self.maximize:
@@ -249,7 +244,7 @@ class FawkesMaskGeneration:
                 optimizer.apply_gradients(zip(grad, [self.modifier]))
 
             if self.it == 1:
-                self.modifier = tf.Variable(self.modifier - tf.sign(grad[0]) * 0.01, dtype=tf.float32)
+                self.modifier.assign(self.modifier - tf.sign(grad[0]) * 0.01)
 
             for e, (input_dist, feature_d, mod_img) in enumerate(zip(dist_raw, internal_dist, aimg_input)):
                 if e >= nb_imgs:
