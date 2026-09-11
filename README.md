@@ -61,11 +61,15 @@ pip install fawkes
 
 If you don't have root privilege, please try to install on user namespace: `pip install --user fawkes`.
 
-To install from a clone of this repository (Python 3.10 or newer):
+To work from a clone of this repository, use [uv](https://docs.astral.sh/uv/), which creates a virtual
+environment with a pinned Python (3.12) and the locked dependency versions:
 
 ```
-pip install .
+uv sync
+uv run fawkes -d ./imgs --mode low
 ```
+
+Plain `pip install .` also works on Python 3.10 or newer.
 
 The two feature-extractor models (about 300 MB in total) are downloaded on first run.
 
@@ -74,8 +78,8 @@ Development
 -----------
 
 ```
-pip install -e '.[dev]'
-pytest
+uv sync
+uv run pytest
 ```
 
 Tests that need the feature-extractor models run only when the models are already in `fawkes/model/`

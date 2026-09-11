@@ -35,7 +35,7 @@ packages = ["fawkes"]
 [tool.setuptools.dynamic]
 version = { attr = "fawkes.__version__" }
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = ["pytest"]
 
 [tool.pytest.ini_options]
