@@ -120,9 +120,11 @@ class Faces(object):
                     self.images_without_face.append(i)
                     continue
 
-                cur_faces = align_img[0]
+                cur_faces, cur_index = align_img
             else:
+                # treat the whole image as one face so it is merged back at full size
                 cur_faces = [cur_img]
+                cur_index = [[0, 0, cur_img.shape[0], cur_img.shape[1]]]
 
             cur_faces = [face for face in cur_faces if face.shape[0] != 0 and face.shape[1] != 0]
             cur_shapes = [f.shape[:-1] for f in cur_faces]
@@ -152,11 +154,9 @@ class Faces(object):
             cur_faces_square = [resize(f, (IMG_SIZE, IMG_SIZE)) for f in cur_faces_square]
             self.cropped_faces.extend(cur_faces_square)
 
-            if not self.no_align:
-                cur_index = align_img[1]
-                self.cropped_faces_shape.extend(cur_shapes)
-                self.cropped_index.extend(cur_index[:len(cur_faces_square)])
-                self.callback_idx.extend([i] * len(cur_faces_square))
+            self.cropped_faces_shape.extend(cur_shapes)
+            self.cropped_index.extend(cur_index[:len(cur_faces_square)])
+            self.callback_idx.extend([i] * len(cur_faces_square))
 
         if len(self.cropped_faces) == 0:
             return
@@ -173,9 +173,6 @@ class Faces(object):
         return self.cropped_faces
 
     def merge_faces(self, protected_images, original_images):
-        if self.no_align:
-            return np.clip(protected_images, 0.0, 255.0), self.images_without_face
-
         self.cloaked_faces = [np.copy(f) for f in self.org_faces]
 
         for i in range(len(self.cropped_faces)):

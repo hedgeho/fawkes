@@ -180,7 +180,8 @@ class FawkesMaskGeneration:
 
         # metrics to test
         best_bottlesim = [0] * nb_imgs if self.maximize else [np.inf] * nb_imgs
-        best_adv = np.zeros(source_imgs.shape)
+        # fall back to the unmodified image if no iteration lands inside the threshold
+        best_adv = np.copy(source_imgs)
 
         # convert to tanh-space
         simg_tanh = self.preprocess_arctanh(source_imgs)

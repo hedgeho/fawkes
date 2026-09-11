@@ -70,6 +70,18 @@ pip install .
 The two feature-extractor models (about 300 MB in total) are downloaded on first run.
 
 
+Development
+-----------
+
+```
+pip install -e '.[dev]'
+pytest
+```
+
+Tests that need the feature-extractor models run only when the models are already in `fawkes/model/`
+(or `FAWKES_TEST_DOWNLOAD=1` is set). Face-detection tests run when `FAWKES_TEST_IMAGES` points to a
+directory of photos containing faces.
+
 Academic Research Usage
 -----------------------
 For academic researchers, whether seeking to improve fawkes or to explore potential vunerability, please refer to the
