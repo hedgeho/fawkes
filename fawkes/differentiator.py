@@ -13,8 +13,6 @@ from keras.utils import Progbar
 
 
 class FawkesMaskGeneration:
-    # if the attack is trying to mimic a target image or a neuron vector
-    MIMIC_IMG = True
     # number of iterations to perform gradient descent
     MAX_ITERATIONS = 10000
     # larger values converge faster to less accurate results
@@ -25,49 +23,41 @@ class FawkesMaskGeneration:
     INTENSITY_RANGE = 'imagenet'
     # threshold for distance
     L_THRESHOLD = 0.03
-    # whether keep the final result or the best result
-    KEEP_FINAL = False
     # max_val of image
     MAX_VAL = 255
     MAXIMIZE = False
     IMAGE_SHAPE = (112, 112, 3)
-    RATIO = 1.0
-    LIMIT_DIST = False
-    LOSS_TYPE = 'features'  # use features (original Fawkes) or gradients (Witches Brew) to run Fawkes?
 
-    def __init__(self, bottleneck_model_ls, mimic_img=MIMIC_IMG,
-                 batch_size=1, learning_rate=LEARNING_RATE,
+    def __init__(self, bottleneck_model_ls, batch_size=1, learning_rate=LEARNING_RATE,
                  max_iterations=MAX_ITERATIONS, initial_const=INITIAL_CONST,
                  intensity_range=INTENSITY_RANGE, l_threshold=L_THRESHOLD,
-                 max_val=MAX_VAL, keep_final=KEEP_FINAL, maximize=MAXIMIZE, image_shape=IMAGE_SHAPE, verbose=1,
-                 ratio=RATIO, limit_dist=LIMIT_DIST, loss_method=LOSS_TYPE, tanh_process=True,
+                 max_val=MAX_VAL, maximize=MAXIMIZE, image_shape=IMAGE_SHAPE, verbose=1,
                  save_last_on_failed=True):
 
-        assert intensity_range in {'raw', 'imagenet', 'inception', 'mnist'}
+        assert intensity_range in {'raw', 'imagenet'}
 
         # constant used for tanh transformation to avoid corner cases
 
         self.it = 0
         self.tanh_constant = 2 - 1e-6
         self.save_last_on_failed = save_last_on_failed
-        self.MIMIC_IMG = mimic_img
-        self.LEARNING_RATE = learning_rate
-        self.MAX_ITERATIONS = max_iterations
+        self.max_iterations = max_iterations
         self.initial_const = initial_const
         self.batch_size = batch_size
         self.intensity_range = intensity_range
         self.l_threshold = l_threshold
         self.max_val = max_val
-        self.keep_final = keep_final
         self.verbose = verbose
         self.maximize = maximize
         self.learning_rate = learning_rate
-        self.ratio = ratio
-        self.limit_dist = limit_dist
         self.single_shape = list(image_shape)
         self.bottleneck_models = bottleneck_model_ls
-        self.loss_method = loss_method
-        self.tanh_process = tanh_process
+
+        # compiled step, its variables and optimizer; built lazily and reused across batches of the same shape
+        self._step = None
+        self._step_shape = None
+        self._optimizer = None
+        self._optimizer_initial_state = None
 
     @staticmethod
     def resize_tensor(input_tensor, model_input_shape):
@@ -164,6 +154,31 @@ class FawkesMaskGeneration:
 
         return step
 
+    def _prepare_step(self, batch_shape):
+        """ (Re)build the compiled step for `batch_shape` or reset its state for a fresh batch.
+
+        Tracing the step costs seconds per extractor, so the same trace is reused for every batch of the
+        same shape; only the variable contents and the optimizer state are reset between batches.
+        """
+        nb_imgs = batch_shape[0]
+        if self._step is None or self._step_shape != batch_shape:
+            self.modifier = tf.Variable(tf.zeros(batch_shape, dtype=tf.float32))
+            self.const = tf.Variable(tf.zeros(nb_imgs, dtype=tf.float32))
+            self.const_diff = tf.Variable(tf.zeros(nb_imgs, dtype=tf.float32))
+            self._optimizer = tf.keras.optimizers.Adadelta(float(self.learning_rate))
+            self._optimizer.build([self.modifier])
+            self._optimizer_initial_state = [v.numpy() for v in self._optimizer.variables]
+            self._step = self._build_step(self._optimizer)
+            self._step_shape = batch_shape
+        else:
+            for var, value in zip(self._optimizer.variables, self._optimizer_initial_state):
+                var.assign(value)
+
+        self.modifier.assign(np.random.uniform(-1, 1, batch_shape) * 1e-4)
+        self.const.assign(np.ones(nb_imgs) * self.initial_const)
+        self.const_diff.assign(np.ones(nb_imgs))
+        return self._step
+
     def compute(self, source_imgs, target_imgs=None):
         """ Main function that runs cloak generation. """
         start_time = time.time()
@@ -177,7 +192,7 @@ class FawkesMaskGeneration:
         print('protection cost %f s' % elapsed_time)
         return np.array(adv_imgs)
 
-    def compute_batch(self, source_imgs, target_imgs=None, retry=True):
+    def compute_batch(self, source_imgs, target_imgs=None):
         """ TF2 method to generate the cloak. """
         nb_imgs = source_imgs.shape[0]
 
@@ -194,34 +209,25 @@ class FawkesMaskGeneration:
         # convert to tanh-space; the source in raw space is constant across iterations
         simg_tanh = tf.constant(self.preprocess_arctanh(source_imgs), dtype=tf.float32)
         simg_raw = self.reverse_arctanh(simg_tanh)
-        self.modifier = tf.Variable(np.random.uniform(-1, 1, tuple([nb_imgs] + self.single_shape)) * 1e-4,
-                                    dtype=tf.float32)
 
-        # make the optimizer
-        optimizer = tf.keras.optimizers.Adadelta(float(self.learning_rate))
-        const_numpy = np.ones(nb_imgs) * self.initial_const
-        self.const = tf.Variable(const_numpy, dtype=tf.float32)
-
+        step = self._prepare_step(tuple([nb_imgs] + self.single_shape))
         const_diff_numpy = np.ones(nb_imgs)
-        self.const_diff = tf.Variable(const_diff_numpy, dtype=tf.float32)
 
         # the features being moved away from (maximize) or towards (mimic) never change,
         # so extract them once instead of on every iteration
         reference_raw = simg_raw if self.maximize else tf.constant(target_imgs, dtype=tf.float32)
         reference_features = self.extract_features(self.input_space_process(reference_raw))
 
-        step = self._build_step(optimizer)
-
         progressbar = None
         if self.verbose == 0:
-            progressbar = Progbar(self.MAX_ITERATIONS, width=30, verbose=1)
+            progressbar = Progbar(self.max_iterations, width=30, verbose=1)
 
         # run the attack
         outside_list = np.ones(nb_imgs)
         dist_raw_np = internal_dist_np = aimg_np = None
         self.it = 0
 
-        while self.it < self.MAX_ITERATIONS:
+        while self.it < self.max_iterations:
 
             self.it += 1
             loss, internal_dist, input_dist_avg, dist_raw, aimg_input, grad = step(

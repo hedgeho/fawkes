@@ -17,7 +17,7 @@ class Worker(QThread):
 
     def run(self):
         if self.my_fawkes is None:
-            self.my_fawkes = Fawkes("extractor_2", '0', 1)
+            self.my_fawkes = Fawkes(gpu='0', mode='low')
         status = self.my_fawkes.run_protection(self.image_paths, debug=True)
         self.signal.emit(status)
 

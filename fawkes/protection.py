@@ -20,32 +20,42 @@ tf.autograph.set_verbosity(3)
 
 import numpy as np
 from fawkes.differentiator import FawkesMaskGeneration
-from fawkes.utils import init_gpu, dump_image, reverse_process_cloaked, \
-    Faces, filter_image_paths, load_extractor
+from fawkes.utils import init_gpu, dump_image, reverse_preprocess, Faces, filter_image_paths, load_extractor, \
+    IMG_SIZE, PREPROCESS
 
 from fawkes.align_face import aligner
 
-
-def generate_cloak_images(protector, image_X, target_emb=None):
-    cloaked_image_X = protector.compute(image_X, target_emb)
-    return cloaked_image_X
-
-
-IMG_SIZE = 112
-PREPROCESS = 'raw'
+# th: DSSIM budget for the perturbation, max_step: optimisation steps, lr: learning rate,
+# sd: penalty constant applied when the perturbation exceeds the budget.
+MODES = {
+    'low': dict(th=0.004, max_step=40, lr=25, sd=1e7, extractors=["extractor_2"]),
+    'mid': dict(th=0.012, max_step=75, lr=20, sd=1e7, extractors=["extractor_0", "extractor_2"]),
+    'high': dict(th=0.017, max_step=150, lr=15, sd=1e7, extractors=["extractor_0", "extractor_2"]),
+}
+# 'custom' takes th, max_step, lr and sd from the caller and optimises against both extractors.
+CUSTOM_EXTRACTORS = ["extractor_0", "extractor_2"]
 
 
 class Fawkes(object):
-    def __init__(self, feature_extractor, gpu, batch_size, mode="low"):
+    def __init__(self, gpu=None, mode="low", th=None, max_step=None, lr=None, sd=None):
+        if mode in MODES:
+            params = MODES[mode]
+        elif mode == 'custom':
+            missing = [name for name, value in (("th", th), ("max_step", max_step), ("lr", lr), ("sd", sd))
+                       if value is None]
+            if missing:
+                raise ValueError("mode 'custom' needs th, max_step, lr and sd (missing: {})".format(", ".join(missing)))
+            params = dict(th=th, max_step=max_step, lr=lr, sd=sd, extractors=CUSTOM_EXTRACTORS)
+        else:
+            raise ValueError("mode must be one of {} or 'custom', got {!r}".format(
+                ", ".join(repr(m) for m in MODES), mode))
 
-        self.feature_extractor = feature_extractor
-        self.gpu = gpu
-        self.batch_size = batch_size
         self.mode = mode
-        th, max_step, lr, extractors = self.mode2param(self.mode)
-        self.th = th
-        self.lr = lr
-        self.max_step = max_step
+        self.th = params['th']
+        self.max_step = params['max_step']
+        self.lr = params['lr']
+        self.sd = params['sd']
+        self.gpu = gpu
         if gpu is not None:
             init_gpu(gpu)
 
@@ -53,37 +63,16 @@ class Fawkes(object):
 
         self.protector = None
         self.protector_param = None
-        self.feature_extractors_ls = [load_extractor(name) for name in extractors]
+        self.feature_extractors_ls = [load_extractor(name) for name in params['extractors']]
 
-    def mode2param(self, mode):
-        if mode == 'low':
-            th = 0.004
-            max_step = 40
-            lr = 25
-            extractors = ["extractor_2"]
+    def run_protection(self, image_paths, batch_size=1, format='png', debug=False, no_align=False,
+                       maximize=True, save_last_on_failed=True):
+        """Cloak every face in `image_paths`, writing <name>_cloaked.<format> next to each input.
 
-        elif mode == 'mid':
-            th = 0.012
-            max_step = 75
-            lr = 20
-            extractors = ["extractor_0", "extractor_2"]
-
-        elif mode == 'high':
-            th = 0.017
-            max_step = 150
-            lr = 15
-            extractors = ["extractor_0", "extractor_2"]
-
-        else:
-            raise Exception("mode must be one of 'min', 'low', 'mid', 'high'")
-        return th, max_step, lr, extractors
-
-    def run_protection(self, image_paths, th=0.04, sd=1e7, lr=10, max_step=500, batch_size=1, format='png',
-                       separate_target=True, debug=False, no_align=False, exp="", maximize=True,
-                       save_last_on_failed=True):
-
-        current_param = "-".join([str(x) for x in [self.th, sd, self.lr, self.max_step, batch_size, format,
-                                                   separate_target, debug]])
+        Returns 1 on success, 2 if no face was found, 3 if no image was found.
+        """
+        current_param = "-".join(str(x) for x in [self.th, self.sd, self.lr, self.max_step, batch_size,
+                                                  debug, maximize, save_last_on_failed])
 
         image_paths, loaded_images = filter_image_paths(image_paths)
 
@@ -101,39 +90,31 @@ class Fawkes(object):
 
         if current_param != self.protector_param:
             self.protector_param = current_param
-            if self.protector is not None:
-                del self.protector
             if batch_size == -1:
                 batch_size = len(original_images)
             self.protector = FawkesMaskGeneration(self.feature_extractors_ls,
                                                   batch_size=batch_size,
-                                                  mimic_img=True,
                                                   intensity_range=PREPROCESS,
-                                                  initial_const=sd,
+                                                  initial_const=self.sd,
                                                   learning_rate=self.lr,
                                                   max_iterations=self.max_step,
                                                   l_threshold=self.th,
                                                   verbose=debug,
                                                   maximize=maximize,
-                                                  keep_final=False,
                                                   image_shape=(IMG_SIZE, IMG_SIZE, 3),
-                                                  loss_method='features',
-                                                  tanh_process=True,
                                                   save_last_on_failed=save_last_on_failed,
                                                   )
-        protected_images = generate_cloak_images(self.protector, original_images)
+        protected_images = self.protector.compute(original_images)
         faces.cloaked_cropped_faces = protected_images
 
         final_images, images_without_face = faces.merge_faces(
-            reverse_process_cloaked(protected_images, preprocess=PREPROCESS),
-            reverse_process_cloaked(original_images, preprocess=PREPROCESS))
+            reverse_preprocess(protected_images, PREPROCESS),
+            reverse_preprocess(original_images, PREPROCESS))
 
-        for i in range(len(final_images)):
+        for i, (p_img, path) in enumerate(zip(final_images, image_paths)):
             if i in images_without_face:
                 continue
-            p_img = final_images[i]
-            path = image_paths[i]
-            file_name = "{}_cloaked.{}".format(".".join(path.split(".")[:-1]), format)
+            file_name = "{}_cloaked.{}".format(os.path.splitext(path)[0], format)
             dump_image(p_img, file_name, format=format)
 
         print("Done!")
@@ -147,54 +128,45 @@ def main(*argv):
     try:
         import signal
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-    except Exception as e:
+    except (AttributeError, ValueError):  # no SIGPIPE on Windows, or not on the main thread
         pass
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Cloak the faces in a directory of images against facial "
+                                                 "recognition models.")
     parser.add_argument('--directory', '-d', type=str,
                         help='the directory that contains images to run protection', default='imgs/')
     parser.add_argument('--gpu', '-g', type=str,
                         help='the GPU id when using GPU for optimization', default='0')
-    parser.add_argument('--mode', '-m', type=str,
-                        help='cloak generation mode, select from min, low, mid, high. The higher the mode is, '
-                             'the more perturbation added and stronger protection',
-                        default='low')
-    parser.add_argument('--feature-extractor', type=str,
-                        help="name of the feature extractor used for optimization",
-                        default="arcface_extractor_0")
+    parser.add_argument('--mode', '-m', choices=['low', 'mid', 'high', 'custom'], default='low',
+                        help='cloak generation mode. The higher the mode is, the more perturbation added and '
+                             'stronger protection. custom uses --th, --max-step, --lr and --sd')
     parser.add_argument('--th', help='only relevant with mode=custom, DSSIM threshold for perturbation', type=float,
                         default=0.01)
     parser.add_argument('--max-step', help='only relevant with mode=custom, number of steps for optimization', type=int,
                         default=1000)
-    parser.add_argument('--sd', type=int, help='only relevant with mode=custom, penalty number, read more in the paper',
+    parser.add_argument('--sd', type=float, help='only relevant with mode=custom, penalty number, read more in the paper',
                         default=1e6)
     parser.add_argument('--lr', type=float, help='only relevant with mode=custom, learning rate', default=2)
     parser.add_argument('--batch-size', help="number of images to run optimization together", type=int, default=1)
-    parser.add_argument('--separate_target', help="whether select separate targets for each faces in the directory",
-                        action='store_true')
-    parser.add_argument('--no-align', help="whether to detect and crop faces",
+    parser.add_argument('--no-align', help="skip face detection and cloak each whole image",
                         action='store_true')
     parser.add_argument('--debug', help="turn on debug and copy/paste the stdout when reporting an issue on github",
                         action='store_true')
-    parser.add_argument('--format', type=str,
-                        help="format of the output image",
-                        default="png")
+    parser.add_argument('--format', choices=['png', 'jpg', 'jpeg'], default="png",
+                        help="format of the output image")
 
     args = parser.parse_args(argv[1:])
 
-    assert args.format in ['png', 'jpg', 'jpeg']
     if args.format == 'jpg':
         args.format = 'jpeg'
 
-    image_paths = glob.glob(os.path.join(args.directory, "*"))
-    image_paths = [path for path in image_paths if "_cloaked" not in path.split("/")[-1]]
+    image_paths = [path for path in glob.glob(os.path.join(args.directory, "*"))
+                   if "_cloaked" not in os.path.basename(path)]
 
-    protector = Fawkes(args.feature_extractor, args.gpu, args.batch_size, mode=args.mode)
+    protector = Fawkes(gpu=args.gpu, mode=args.mode, th=args.th, max_step=args.max_step, lr=args.lr, sd=args.sd)
 
-    protector.run_protection(image_paths, th=args.th, sd=args.sd, lr=args.lr,
-                             max_step=args.max_step,
-                             batch_size=args.batch_size, format=args.format,
-                             separate_target=args.separate_target, debug=args.debug, no_align=args.no_align)
+    protector.run_protection(image_paths, batch_size=args.batch_size, format=args.format,
+                             debug=args.debug, no_align=args.no_align)
 
 
 if __name__ == '__main__':

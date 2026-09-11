@@ -101,6 +101,26 @@ def test_sanitize_legacy_config_strips_groups():
     assert cfg["layers"][1]["config"]["groups"] == 1
 
 
+def test_faces_marks_images_without_a_face():
+    noise = _random_image((160, 160, 3), seed=3)
+    faces = utils.Faces(["noise.png"], [noise], aligner(), verbose=0)
+    assert len(faces.cropped_faces) == 0
+    assert faces.images_without_face == [0]
+
+
+def test_mode_validation_happens_before_any_model_loads():
+    with pytest.raises(ValueError, match="custom"):
+        Fawkes(gpu=None, mode="custom", th=0.01)
+    with pytest.raises(ValueError, match="mode must be one of"):
+        Fawkes(gpu=None, mode="min")
+
+
+def test_named_modes_define_all_parameters():
+    from fawkes.protection import MODES
+    for name, params in MODES.items():
+        assert set(params) == {"th", "max_step", "lr", "sd", "extractors"}, name
+
+
 @needs_images
 def test_align_detects_faces_and_merge_roundtrips():
     paths = [p for p in sorted(glob.glob(os.path.join(IMAGE_DIR, "*"))) if "_cloaked" not in p]
@@ -127,11 +147,18 @@ def test_extractors_load_and_embed(name):
 
 
 @needs_models
+def test_custom_mode_uses_given_parameters():
+    protector = Fawkes(gpu=None, mode="custom", th=0.02, max_step=7, lr=3, sd=1e5)
+    assert (protector.th, protector.max_step, protector.lr, protector.sd) == (0.02, 7, 3, 1e5)
+    assert len(protector.feature_extractors_ls) == 2
+
+
+@needs_models
 def test_end_to_end_no_align(tmp_path):
     src = tmp_path / "face.png"
     Image.fromarray(_smooth_image().astype(np.uint8)).save(src)
 
-    protector = Fawkes("extractor_2", gpu=None, batch_size=1, mode="low")
+    protector = Fawkes(gpu=None, mode="low")
     protector.max_step = 3
     status = protector.run_protection([str(src)], batch_size=1, format="png", no_align=True)
     assert status == 1
