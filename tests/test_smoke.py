@@ -110,8 +110,9 @@ def test_end_to_end_low_mode(tmp_path):
     utils.dump_image(img[max(0, y1 - m):y2 + m, max(0, x1 - m):x2 + m], str(target / "t.png"))
     utils.dump_image(img, str(work / "a.png"))
 
-    # the target is the same person, so disable early stopping to force a perturbation
-    protector = Fawkes(mode="low", target_dir=str(target), steps=3, batch_size=2, stop_cos=1.01)
+    # the target is the same person, so disable early stopping to force a perturbation; no robustness
+    # views, so that every one of the three steps is a clean step that records its perturbation
+    protector = Fawkes(mode="low", target_dir=str(target), steps=3, batch_size=2, stop_cos=1.01, eot_samples=0)
     assert protector.run_protection([str(work / "a.png")], debug=True) == 1
     out = utils.load_image(str(work / "a_cloaked.png"))
     assert out.shape == img.shape
@@ -119,6 +120,6 @@ def test_end_to_end_low_mode(tmp_path):
     assert diff.max() > 0 and diff.max() <= MODES["low"]["eps"] + 1
     assert (target / "fawkes_target.npz").exists()
     # second run reuses the saved target and is deterministic
-    protector2 = Fawkes(mode="low", target_dir=str(target), steps=3, batch_size=2, stop_cos=1.01)
+    protector2 = Fawkes(mode="low", target_dir=str(target), steps=3, batch_size=2, stop_cos=1.01, eot_samples=0)
     assert protector2.run_protection([str(work / "a.png")]) == 1
     np.testing.assert_array_equal(utils.load_image(str(work / "a_cloaked.png")), out)

@@ -46,7 +46,7 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
 
   | mode | surrogates | steps | max pixel change | DSSIM budget | robustness views | s / face, 8-core CPU |
   |---|---|---|---|---|---|---|
-  | low | AdaFace IR-101, ArcFace IR-100 | 40 | 16 | 0.012 | none | 20 |
+  | low | AdaFace IR-101, ArcFace IR-100 | 60 | 16 | 0.012 | blur, resize, JPEG | 35 |
   | mid | + LVFace-B | 60 | 16 | 0.012 | blur, resize, JPEG | 56 |
   | high | same three | 200 | 16 | 0.017 | blur, resize, JPEG | about 190 |
 
@@ -77,7 +77,7 @@ embedding is cached in `<target-dir>/fawkes_target.npz` after the first run.
 
 ### Tips
 
-- Run time on an 8-core CPU without a GPU is about 20 s per face in `low` and a minute per face in
+- Run time on an 8-core CPU without a GPU is about 35 s per face in `low` and a minute per face in
   `mid`; batching several faces is faster per face. A CUDA GPU is used automatically when PyTorch
   finds one (install with the `cu128` extra).
 - Most of your published photos need to be cloaked for the protection to work; a recogniser trained
@@ -97,21 +97,33 @@ Evaluation
 ----------
 
 `eval/harness.py` downloads a subset of [LFW](http://vis-www.cs.umass.edu/lfw/), cloaks the training
-photos of some identities, trains a linear classifier on face embeddings from **held-out**
-recognisers (InsightFace `buffalo_l` and `antelopev2`, the packs most deployments use), and
-reports the **protection rate**: the fraction of clean test photos of protected identities that the
-classifier gets wrong. 10 protected and 10 clean identities, 10 training and 5 test photos each.
+photos of some identities (each toward its own target identity), trains a linear classifier on face
+embeddings from **held-out** recognisers, and reports the **protection rate**: the fraction of clean
+test photos of protected identities that the classifier gets wrong. 10 protected and 10 clean
+identities, 10 training and 5 test photos each. The evaluators are the InsightFace packs most
+deployments use (`buffalo_l`, a ResNet-50; `antelopev2`, a ResNet-100) and a vision transformer
+(AdaFace ViT-B, WebFace4M); none of them is in the surrogate ensemble.
 
-| cloaker | buffalo_l | antelopev2 | cos to own clean face | s / photo (8-core CPU) |
-|---|---|---|---|---|
-| none | 0.00 | 0.00 | 0.77 | - |
-| Fawkes 1.0 (TensorFlow), mid | 0.00 | 0.00 | 0.57 | 15 |
-| Fawkes 1.0, mid, JPEG 75 | 0.00 | 0.00 | 0.57 | 15 |
-| Fawkes 2, low | see `eval/results/` | | | |
-| Fawkes 2, mid | see `eval/results/` | | | |
+| cloaker | buffalo_l | antelopev2 | AdaFace ViT-B | DSSIM face box | s / photo |
+|---|---|---|---|---|---|
+| none | 0.00 | 0.00 | 0.00 | 0 | - |
+| Fawkes 1.0 (TensorFlow), mid | 0.00 | 0.00 | - | 0.015 | 15 (CPU) |
+| Fawkes 1.0, mid, JPEG 75 | 0.00 | 0.00 | - | 0.015 | - |
+| Fawkes 2, low | 0.74 | 0.90 | 0.20 | 0.012 | 35 (CPU), 1.1 (A100) |
+| Fawkes 2, low, JPEG 75 | 0.70 | 0.84 | 0.22 | 0.012 | - |
+| Fawkes 2, mid | 0.74 | 0.84 | 0.32 | 0.012 | 56 (CPU), 1.0 (A100) |
+| Fawkes 2, mid, JPEG 75 | 0.72 | 0.78 | 0.30 | 0.012 | - |
+| Fawkes 2, high | 0.80 | 0.92 | 0.56 | 0.017 | about 190 (CPU), 2.2 (A100) |
+| Fawkes 2, high, JPEG 75 | HIGH_JPEG | 0.017 | - |
 
 The original cloaks move the embeddings a little but every protected identity is still recognised.
-See [eval/README.md](eval/README.md) for the metrics and how to run it.
+Fawkes 2 defeats the classifier for most identities on the ResNet recognisers, less so on the
+transformer, whose features the ensemble (one transformer out of three surrogates) matches least.
+Under 1:1 verification with the usual 0.3 cosine threshold, every cloaked photo in `mid` and
+`high` fails to match its own identity on all three evaluators. Each number is 50 test photos, so
+differences below about 0.06 are noise. Every configuration tried on the way to these settings is
+in [eval/RESULTS.md](eval/RESULTS.md); the reasoning is in [docs/DECISIONS.md](docs/DECISIONS.md). See [eval/README.md](eval/README.md) for the metrics and
+how to run it.
 
 Quick Installation
 ------------------

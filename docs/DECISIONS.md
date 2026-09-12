@@ -57,12 +57,21 @@ coordinates also removes the inverse warp that would resample the cloak a second
 ## 4. Expectation over transformations: blur, resize, JPEG; not hue
 
 **Decision.** Each optimisation step evaluates the loss on randomly blurred, resized and
-JPEG-approximated copies (two samples per step; off in `low` mode).
+JPEG-approximated copies, one view per step cycling through the clean alignment and two (five in
+`high`) augmented views; on in every mode.
 
 **Evidence.** LowKey's differentiable blur in the loop is one of the two changes credited with its
 large gain over Fawkes. Several follow-ups report JPEG and Gaussian noise degrading Fawkes cloaks (e.g. the Florida Tech thesis ["An Assessment of Image-Cloaking Techniques"](https://repository.fit.edu/cgi/viewcontent.cgi?article=1793&context=etd)).
 The [EOLT study](https://arxiv.org/abs/2512.07228) evaluated 30 transformations and found blur is the bottleneck that must be included
 while hue augmentation overfits and *reduces* transfer. Social platforms re-encode uploads as JPEG.
+
+**Measured after the fact (2026-09-12).** The views do more than make cloaks survive JPEG. The
+fast mode with two surrogates and no views gives protection 0.22 / 0.42 / 0.00 on the three
+held-out evaluators and drops to 0.10 / 0.18 / 0.00 after JPEG 75; the same mode with the views
+gives 0.74 / 0.90 / 0.20 and keeps it under JPEG. The views act as a regulariser that stops the
+perturbation from over-fitting the surrogates, the same effect input diversity has in the
+transfer-attack literature. Five views per clean step instead of two adds about 0.10 on the
+transformer evaluator in `high` at no extra cost per step.
 
 ## 5. PyTorch replaces TensorFlow
 
