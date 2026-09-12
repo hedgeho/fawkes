@@ -70,5 +70,8 @@ What the sweep says:
 | low, JPEG 75 | 0.70 | 0.84 | 0.22 | | |
 | mid | 0.74 | 0.84 | 0.32 | 0.012 | 1.0 |
 | mid, JPEG 75 | 0.72 | 0.78 | 0.30 | | |
-| high | 0.80 | 0.92 | 0.56 | 0.017 | 2.2 |
-| high, JPEG 75 | HIGH_JPEG | | |
+| high | 0.80 | 0.90 | 0.58 | 0.017 | 2.3 |
+| high, JPEG 75 | 0.78 | 0.90 | 0.56 | | |
+
+The final high run repeats configuration X with a different GPU allocation; the two agree within
+0.02, which is the run-to-run noise of the cloaker on a GPU.

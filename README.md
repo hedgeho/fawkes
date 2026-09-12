@@ -113,8 +113,8 @@ deployments use (`buffalo_l`, a ResNet-50; `antelopev2`, a ResNet-100) and a vis
 | Fawkes 2, low, JPEG 75 | 0.70 | 0.84 | 0.22 | 0.012 | - |
 | Fawkes 2, mid | 0.74 | 0.84 | 0.32 | 0.012 | 56 (CPU), 1.0 (A100) |
 | Fawkes 2, mid, JPEG 75 | 0.72 | 0.78 | 0.30 | 0.012 | - |
-| Fawkes 2, high | 0.80 | 0.92 | 0.56 | 0.017 | about 190 (CPU), 2.2 (A100) |
-| Fawkes 2, high, JPEG 75 | HIGH_JPEG | 0.017 | - |
+| Fawkes 2, high | 0.80 | 0.90 | 0.58 | 0.017 | about 190 (CPU), 2.3 (A100) |
+| Fawkes 2, high, JPEG 75 | 0.78 | 0.90 | 0.56 | 0.017 | - |
 
 The original cloaks move the embeddings a little but every protected identity is still recognised.
 Fawkes 2 defeats the classifier for most identities on the ResNet recognisers, less so on the
