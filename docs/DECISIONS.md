@@ -124,6 +124,31 @@ meaningless; only transfer to unseen models matters. [LFW](http://vis-www.cs.uma
 [scikit-learn](https://scikit-learn.org/stable/modules/generated/sklearn.datasets.fetch_lfw_people.html), so the number is reproducible by anyone. A linear probe on frozen embeddings is how
 a low-effort adversary would actually build a recogniser from scraped photos.
 
+## 10. Penalise the residual similarity to the own face, not only the distance to the target
+
+**Decision.** The loss adds `self_weight` times the positive part of the cosine between the cloaked
+face and its own clean embedding, averaged over the surrogates, on top of the target term. A
+`laggard` option weights the surrogates by softmax((1 - cos) / laggard) so the one furthest from
+the target leads the gradient.
+
+**Evidence.** Measured with the harness on 2026-09-12 (LFW, 10 protected + 10 clean identities,
+one target per identity, GPU): the target-only `mid` cloak moves every photo far from its identity
+by the 1:1 verification measure (71 percent of cloaked photos below the 0.3 cosine threshold) yet
+the linear probe still recognises 80 to 98 percent of the protected people (protection 0.20 / 0.14 /
+0.02 on `buffalo_l` / `antelopev2` / `adaface_vit_b`). The probe works from the residual: the mean
+cosine of a cloaked photo to its identity's clean centroid is 0.23 to 0.35, against 0.0 for
+unrelated people, and a linear classifier only needs that direction. This is the mechanism
+Radiya-Dixit and Tramer describe for why an adversary with a better model recovers the identity.
+Adding the residual term with weight 1 and nothing else changed takes protection to 0.64 / 0.74 /
+0.26 at the same DSSIM (0.012), and the residual cosine drops to 0.06 to 0.20. LowKey's objective is
+the same idea in untargeted form (maximise the distance to the original embedding); combining
+"toward the target" with "away from self" keeps the coherence across a user's photos that the
+target gives while removing the signal the probe uses. Laggard weighting and a larger L-infinity
+bound (16 at the same DSSIM budget) each add a few more points; the transformer evaluator remains
+the hardest, as the ensemble holds one transformer. The harness assigns one target per protected
+identity because that is how independent users behave; a single shared target is kept as an
+option and gives higher numbers on the ResNet evaluators and lower on the transformer.
+
 ## Known limits, stated plainly
 
 - No cloak can defend against a model trained adaptively after the cloaked photos are public
