@@ -27,6 +27,8 @@ class CloakParams:
     blur_sigma_max: float = 1.5
     resize_min: float = 0.7
     jpeg_quality: tuple = (60, 95)
+    self_weight: float = 0.0  # penalty on the cosine to the face's own clean embedding (residual identity)
+    laggard: float = 0.0  # >0: weight surrogates by softmax((1 - cos) / laggard) so the worst one leads
     stop_cos: float = 0.75  # stop a face once every surrogate is this close to the target
     patience: int = 10  # stop a face when its clean loss has not improved for this many clean steps
     seed: int = 0
@@ -251,14 +253,30 @@ class Cloaker:
         x = jpeg_approx(x, float(rng.uniform(*p.jpeg_quality)))
         return x
 
-    def _feature_loss(self, aligned, target_vecs):
-        """(N,) mean over surrogates of 1 - cos, and (N, n_models) cosines."""
-        cosines = []
+    def _feature_loss(self, aligned, target_vecs, self_vecs=None):
+        """(N,) feature loss and (N, n_models) cosines to the target.
+
+        The loss is the weighted mean over surrogates of (1 - cos to target), plus `self_weight`
+        times the positive part of the cosine to the face's own clean embedding: what a later
+        recogniser can still use to identify the person is that residual, not the target.
+        """
+        p = self.params
+        cosines, self_cos = [], []
         for k, model in self.surrogates.items():
             emb = model(aligned)
             cosines.append((emb * target_vecs[k][None]).sum(dim=1))
+            if self_vecs is not None:
+                self_cos.append((emb * self_vecs[k]).sum(dim=1))
         cosines = torch.stack(cosines, dim=1)
-        return (1 - cosines).mean(dim=1), cosines
+        away = 1 - cosines
+        if p.laggard > 0:
+            weights = torch.softmax(away.detach() / p.laggard, dim=1)
+            loss = (weights * away).sum(dim=1)
+        else:
+            loss = away.mean(dim=1)
+        if self_vecs is not None and p.self_weight > 0:
+            loss = loss + p.self_weight * F.relu(torch.stack(self_cos, dim=1)).mean(dim=1)
+        return loss, cosines
 
     def _cloak_batch(self, crops, targets, rng):
         p = self.params
@@ -268,6 +286,11 @@ class Cloaker:
         images, mask = images.to(dev), mask.to(dev)
         target_vecs = {k: torch.as_tensor(np.asarray(targets[k], np.float32), device=dev) for k in self.surrogates}
         clean_m = np.stack([c.matrix for c in crops])
+        self_vecs = None
+        if p.self_weight > 0:
+            with torch.no_grad():
+                clean_aligned = warp_to_template(images / 255.0, clean_m)
+                self_vecs = {k: model(clean_aligned) for k, model in self.surrogates.items()}
         delta = torch.zeros_like(images, requires_grad=True)
         opt = torch.optim.Adam([delta], lr=p.lr)
 
@@ -292,7 +315,7 @@ class Cloaker:
                 jitter = rng.uniform(-p.kps_jitter, p.kps_jitter, size=(n, 5, 2)).astype(np.float32)
                 m = np.stack([estimate_norm(c.kps + jitter[i]) for i, c in enumerate(crops)])
                 aligned = self._augment(warp_to_template(x / 255.0, m), rng)
-            feat_loss, cosines = self._feature_loss(aligned, target_vecs)
+            feat_loss, cosines = self._feature_loss(aligned, target_vecs, self_vecs)
             d = dssim(x, images, mask)
             penalty = p.dssim_weight * F.relu(d - p.dssim_budget)
             loss = ((feat_loss + penalty) * active.float()).sum()

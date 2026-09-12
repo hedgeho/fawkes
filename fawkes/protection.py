@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # Fawkes v2 driver: detect, align, cloak toward a target identity, paste back, save.
 import argparse
+import dataclasses
 import glob
 import os
 import sys
@@ -27,7 +28,8 @@ MODES = {
 class Fawkes(object):
     def __init__(self, mode="mid", target_dir=None, models=None, steps=None, eps=None, dssim_budget=None,
                  eot_samples=None, stop_cos=None, threads=None, seed=0, batch_size=8, verbose=False,
-                 device=None):
+                 device=None, **cloak_params):
+        """`cloak_params`: any further CloakParams field (self_weight, laggard, lr, patience, ...)."""
         if mode not in MODES:
             raise ValueError("mode must be one of {}, got {!r}".format(", ".join(repr(m) for m in MODES), mode))
         if target_dir is None:
@@ -41,6 +43,11 @@ class Fawkes(object):
                 params[name] = value
         if models:
             params["models"] = list(models)
+        fields = {f.name for f in dataclasses.fields(CloakParams)}
+        unknown = [k for k in cloak_params if k not in fields]
+        if unknown:
+            raise TypeError("unknown cloak parameter(s) {}; known: {}".format(unknown, ", ".join(sorted(fields))))
+        params.update({k: v for k, v in cloak_params.items() if v is not None})
 
         from fawkes.models import SURROGATES
         unknown = [m for m in params["models"] if m not in SURROGATES]
@@ -85,6 +92,13 @@ class Fawkes(object):
             from fawkes.target import get_or_build_target
             self._target = get_or_build_target(self.target_dir, self.model_keys, self.detector, self.cloaker)
         return self._target
+
+    def set_target_dir(self, target_dir):
+        """Switch to another target identity, keeping the loaded models."""
+        if not os.path.isdir(target_dir):
+            raise ValueError("target_dir {!r} is not a directory".format(target_dir))
+        self.target_dir = target_dir
+        self._target = None
 
     def run_protection(self, image_paths, format='png', no_align=False, debug=False):
         """Cloak every face in `image_paths`, writing <name>_cloaked.<format> next to each input.
@@ -164,6 +178,8 @@ def main(*argv):
     parser.add_argument('--th', type=float, default=None, help='DSSIM budget for the perturbation')
     parser.add_argument('--no-eot', action='store_true',
                         help='skip the blur/resize/JPEG robustness copies (faster, less robust)')
+    parser.add_argument('--self-weight', type=float, default=None,
+                        help="weight of the penalty on the face's remaining similarity to itself")
     parser.add_argument('--batch-size', type=int, default=8, help="number of faces optimised together")
     parser.add_argument('--threads', type=int, default=None, help='CPU threads for torch')
     parser.add_argument('--device', type=str, default=None,
@@ -187,7 +203,8 @@ def main(*argv):
                        models=args.models.split(",") if args.models else None,
                        steps=args.steps, eps=args.eps, dssim_budget=args.th,
                        eot_samples=0 if args.no_eot else None, threads=args.threads, seed=args.seed,
-                       batch_size=args.batch_size, verbose=args.debug, device=args.device)
+                       batch_size=args.batch_size, verbose=args.debug, device=args.device,
+                       self_weight=args.self_weight)
     return protector.run_protection(image_paths, format=args.format, no_align=args.no_align, debug=args.debug)
 
 

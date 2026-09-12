@@ -17,19 +17,18 @@ uv run python -c "import torch; print('torch', torch.__version__, 'cuda', torch.
 uv run pytest -q -x
 uv run python -m fawkes.models bench --batch 8 || true
 rm -rf out/smoke && mkdir -p out/smoke/imgs out/smoke/target
-cp tests/data/aligned_112.png out/smoke/target/t.png
-cp eval/work/full/_target/*.png out/smoke/target/ 2>/dev/null || true
 uv run python - <<'PY'
-# a photo to cloak: the LFW fixture identity is the target, so cloak a different LFW person
-from sklearn.datasets import fetch_lfw_people
-from PIL import Image
-import numpy as np
-d = fetch_lfw_people(min_faces_per_person=20, color=True, resize=1.0, funneled=True)
-names = list(d.target_names)
-for i, name in enumerate(["George W Bush", "Colin Powell"]):
-    idx = np.where(d.target == names.index(name))[0][:3]
-    for j, k in enumerate(idx):
-        Image.fromarray((d.images[k] * 255).astype(np.uint8)).save(f"out/smoke/imgs/{name.replace(' ', '_')}_{j}.png")
+# whole LFW photos (250x250 funneled JPEGs) as the harness uses them: two people to cloak, one target
+import importlib.util
+spec = importlib.util.spec_from_file_location("harness", "eval/harness.py")
+h = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(h)
+counts = h.load_lfw()
+for name in ["George_W_Bush", "Colin_Powell"]:
+    for j, src in enumerate(counts[name][:3]):
+        h.write_png(src, f"out/smoke/imgs/{name}_{j}.png")
+for j, src in enumerate(counts["Tiger_Woods"][:5]):
+    h.write_png(src, f"out/smoke/target/{j}.png")
 PY
 uv run python -m fawkes -d out/smoke/imgs -t out/smoke/target -m mid --debug --batch-size 8
 ls -la out/smoke/imgs

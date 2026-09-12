@@ -55,19 +55,24 @@ class Identity:
 class Split:
     protected: list      # list[Identity]
     clean: list          # list[Identity]
-    target: Identity     # extra identity for the v2 cloaker's target
+    targets: list        # list[Identity]: one shared target, or one per protected identity
+
+    def target_for(self, k):
+        """Target identity of protected identity number k."""
+        return self.targets[k % len(self.targets)]
 
 
-def select_identities(counts, seed, n_protected, n_clean, train_per_id, test_per_id):
+def select_identities(counts, seed, n_protected, n_clean, train_per_id, test_per_id, n_targets=1):
     """Deterministically choose protected / clean / target identities and split their photos.
 
     `counts` maps identity name -> sorted list of its photo file names. Only identities with
-    enough photos are candidates. Returns a Split; all three groups are disjoint.
+    enough photos are candidates. Returns a Split; all three groups are disjoint. The protected
+    and clean sets do not depend on `n_targets`.
     """
     rng = np.random.default_rng(seed)
     need = train_per_id + test_per_id
     candidates = sorted(name for name, files in counts.items() if len(files) >= need)
-    n_total = n_protected + n_clean + 1
+    n_total = n_protected + n_clean + n_targets
     if len(candidates) < n_total:
         raise SystemExit(f"need {n_total} identities with >= {need} photos, only {len(candidates)} available")
     order = rng.permutation(len(candidates))
@@ -83,7 +88,7 @@ def select_identities(counts, seed, n_protected, n_clean, train_per_id, test_per
     identities = [make(name) for name in chosen]
     return Split(protected=identities[:n_protected],
                  clean=identities[n_protected:n_protected + n_clean],
-                 target=identities[-1])
+                 targets=identities[n_protected + n_clean:])
 
 
 def load_lfw():
@@ -115,18 +120,23 @@ def write_png(src, dst):
 
 
 def materialise(split, workdir):
-    """Write <workdir>/<identity>/<train|test>/<n>.png for every identity, plus <workdir>/_target/."""
+    """Write <workdir>/<identity>/<train|test>/<n>.png for every identity and
+    <workdir>/_targets/<target>/<n>.png for every target. Returns {protected name: target dir}."""
     for ident in split.protected + split.clean:
         for part in ("train", "test"):
             out_dir = os.path.join(workdir, ident.name, part)
             os.makedirs(out_dir, exist_ok=True)
             for n, src in enumerate(getattr(ident, part)):
                 write_png(src, os.path.join(out_dir, f"{n}.png"))
-    target_dir = os.path.join(workdir, "_target")
-    os.makedirs(target_dir, exist_ok=True)
-    for n, src in enumerate(split.target.train):
-        write_png(src, os.path.join(target_dir, f"{n}.png"))
-    return target_dir
+    target_dirs = {}
+    for k, ident in enumerate(split.protected):
+        target = split.target_for(k)
+        target_dir = os.path.join(workdir, "_targets", target.name)
+        os.makedirs(target_dir, exist_ok=True)
+        for n, src in enumerate(target.train):
+            write_png(src, os.path.join(target_dir, f"{n}.png"))
+        target_dirs[ident.name] = target_dir
+    return target_dirs
 
 
 def photo_path(workdir, ident, part, n):
@@ -148,12 +158,12 @@ def remove_stale_cloaks(paths):
                 os.remove(os.path.join(d, f))
 
 
-def cloak_none(paths, args, target_dir):
+def cloak_none(paths, args, target_dirs):
     for p in paths:
         shutil.copyfile(p, cloaked_path(p))
 
 
-def cloak_legacy(paths, args, target_dir):
+def cloak_legacy(paths, args, target_dirs):
     from fawkes.protection import Fawkes
     rc = Fawkes(gpu=None, mode=args.mode).run_protection(paths, batch_size=args.batch_size)
     if rc == 2:
@@ -162,26 +172,55 @@ def cloak_legacy(paths, args, target_dir):
         raise SystemExit("legacy cloaker: no images found")
 
 
-def cloak_v2(paths, args, target_dir):
-    try:
-        from fawkes.protection import Fawkes
-        protector = Fawkes(mode=args.mode, target_dir=target_dir, batch_size=args.batch_size)
-    except (ImportError, TypeError) as e:
-        raise SystemExit(f"v2 cloaker API (Fawkes(mode=..., target_dir=...)) is not available: {e!r}")
-    rc = protector.run_protection(paths)
-    if rc not in (None, 1):
-        print(f"v2 cloaker returned {rc}")
+def parse_cloak_args(items):
+    """['steps=120', 'self_weight=1.0', 'models=a,b'] -> {'steps': 120, 'self_weight': 1.0, 'models': ['a', 'b']}"""
+    out = {}
+    for item in items or []:
+        if "=" not in item:
+            raise SystemExit(f"--cloak-arg expects name=value, got {item!r}")
+        name, value = item.split("=", 1)
+        if name == "models":
+            out[name] = value.split(",")
+            continue
+        for cast in (int, float):
+            try:
+                out[name] = cast(value)
+                break
+            except ValueError:
+                continue
+        else:
+            out[name] = value
+    return out
+
+
+def cloak_v2(paths, args, target_dirs):
+    """One Fawkes instance; the photos are grouped by target so the models load once."""
+    groups = {}
+    for p in paths:
+        groups.setdefault(target_dirs[p], []).append(p)
+    protector = None
+    for target_dir, group in groups.items():
+        if protector is None:
+            from fawkes.protection import Fawkes
+            protector = Fawkes(mode=args.mode, target_dir=target_dir, batch_size=args.batch_size,
+                               **parse_cloak_args(args.cloak_arg))
+        else:
+            protector.set_target_dir(target_dir)
+        rc = protector.run_protection(group)
+        if rc not in (None, 1):
+            print(f"v2 cloaker returned {rc}")
 
 
 CLOAKERS = {"none": cloak_none, "legacy": cloak_legacy, "v2": cloak_v2}
 
 
-def run_cloaker(args, paths, target_dir):
-    """Cloak `paths` in place (writes <n>_cloaked.png next to each). Returns seconds per photo and the
-    list of photos for which the cloaker produced no output (they are evaluated uncloaked)."""
+def run_cloaker(args, paths, target_dirs):
+    """Cloak `paths` in place (writes <n>_cloaked.png next to each); `target_dirs` maps each path to
+    its target directory. Returns seconds per photo and the list of photos for which the cloaker
+    produced no output (they are evaluated uncloaked)."""
     remove_stale_cloaks(paths)
     t0 = time.perf_counter()
-    CLOAKERS[args.cloaker](paths, args, target_dir)
+    CLOAKERS[args.cloaker](paths, args, target_dirs)
     seconds = time.perf_counter() - t0
     missing = [p for p in paths if not os.path.exists(cloaked_path(p))]
     for p in missing:
@@ -414,6 +453,11 @@ def parse_args(argv=None):
     ap.add_argument("--cloaker", choices=sorted(CLOAKERS), default="none")
     ap.add_argument("--mode", default="mid", help="cloaker mode (low/mid/high)")
     ap.add_argument("--batch-size", type=int, default=1, help="cloaker optimisation batch size")
+    ap.add_argument("--cloak-arg", action="append", default=None, metavar="NAME=VALUE",
+                    help="v2 cloaker parameter override, repeatable (e.g. steps=120, self_weight=1.0)")
+    ap.add_argument("--shared-target", action="store_true",
+                    help="all protected identities mimic one target (default: one target per identity)")
+    ap.add_argument("--tag", default=None, help="extra label for the results file and report header")
     ap.add_argument("--jpeg", type=int, default=None, metavar="Q", help="re-encode cloaked photos as JPEG quality Q")
     ap.add_argument("--evaluator", action="append", default=None,
                     help="evaluator key; repeatable. Built in: " + ", ".join(BUILTIN_EVALUATORS) +
@@ -444,17 +488,21 @@ def main(argv=None):
 
     print("loading LFW ...")
     counts = load_lfw()
-    split = select_identities(counts, args.seed, args.n_protected, args.n_clean, args.train_per_id, args.test_per_id)
-    target_dir = materialise(split, workdir)
-    print(f"protected: {[i.name for i in split.protected]}\nclean: {[i.name for i in split.clean]}\ntarget: {split.target.name}")
+    split = select_identities(counts, args.seed, args.n_protected, args.n_clean, args.train_per_id, args.test_per_id,
+                              n_targets=1 if args.shared_target else args.n_protected)
+    target_dirs = materialise(split, workdir)
+    print(f"protected: {[i.name for i in split.protected]}\nclean: {[i.name for i in split.clean]}\n"
+          f"targets: {[i.name for i in split.targets]}")
 
     to_cloak = [photo_path(workdir, i, "train", n) for i in split.protected for n in range(len(i.train))]
+    path_targets = {photo_path(workdir, i, "train", n): target_dirs[i.name]
+                    for i in split.protected for n in range(len(i.train))}
     if args.skip_cloak:
         seconds_per_photo = args.seconds_per_photo
         uncloaked = [p for p in to_cloak if not os.path.exists(cloaked_path(p))]
     else:
         print(f"cloaking {len(to_cloak)} photos with {args.cloaker} (mode {args.mode}) ...")
-        seconds_per_photo, uncloaked = run_cloaker(args, to_cloak, target_dir)
+        seconds_per_photo, uncloaked = run_cloaker(args, to_cloak, path_targets)
         print(f"cloaked in {fmt(seconds_per_photo, 1)} s/photo; {len(uncloaked)} photos got no cloak")
 
     quality = image_quality([(p, cloaked_path(p)) for p in to_cloak])
@@ -471,12 +519,14 @@ def main(argv=None):
         results["evaluators"][key] = evaluate(make_evaluator(key), cache, split, workdir, cloaked_files)
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    tag = f"{time.strftime('%Y%m%d-%H%M%S')}_{args.cloaker}_{args.mode}" + (f"_jpeg{args.jpeg}" if args.jpeg else "") + ("_smoke" if args.smoke else "")
+    tag = (f"{time.strftime('%Y%m%d-%H%M%S')}_{args.cloaker}_{args.mode}" + (f"_{args.tag}" if args.tag else "")
+           + (f"_jpeg{args.jpeg}" if args.jpeg else "") + ("_smoke" if args.smoke else ""))
     out = os.path.join(RESULTS_DIR, tag + ".json")
     with open(out, "w") as f:
         json.dump(results, f, indent=1, default=str)
     report = markdown_report(results)
-    print(f"\n### {args.cloaker} / {args.mode}" + (f" / jpeg {args.jpeg}" if args.jpeg else "") + "\n\n" + report)
+    print(f"\n### {args.cloaker} / {args.mode}" + (f" / {args.tag}" if args.tag else "")
+          + (f" / jpeg {args.jpeg}" if args.jpeg else "") + "\n\n" + report)
     print(f"\nwritten {os.path.relpath(out, ROOT)}")
     return results
 

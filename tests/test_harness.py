@@ -23,9 +23,9 @@ def test_split_is_deterministic_and_disjoint():
     c = harness.select_identities(counts, seed=1, n_protected=10, n_clean=10, train_per_id=10, test_per_id=5)
     assert a == b
     assert a != c
-    names = [i.name for i in a.protected] + [i.name for i in a.clean] + [a.target.name]
+    names = [i.name for i in a.protected] + [i.name for i in a.clean] + [t.name for t in a.targets]
     assert len(names) == len(set(names)) == 21
-    for ident in a.protected + a.clean + [a.target]:
+    for ident in a.protected + a.clean + a.targets:
         assert len(ident.train) == 10 and len(ident.test) == 5
         assert not set(ident.train) & set(ident.test)
         assert set(ident.train + ident.test) <= set(counts[ident.name])
@@ -35,7 +35,7 @@ def test_split_skips_identities_with_too_few_photos():
     counts = fake_counts(n_ids=5, n_photos=20)
     counts["Small_Person"] = ["Small_Person_0001.jpg"] * 3
     s = harness.select_identities(counts, seed=0, n_protected=2, n_clean=2, train_per_id=4, test_per_id=2)
-    assert "Small_Person" not in [i.name for i in s.protected + s.clean + [s.target]]
+    assert "Small_Person" not in [i.name for i in s.protected + s.clean + s.targets]
     with pytest.raises(SystemExit):
         harness.select_identities(counts, seed=0, n_protected=5, n_clean=5, train_per_id=4, test_per_id=2)
 
@@ -102,3 +102,24 @@ def test_image_quality_on_identical_and_perturbed(tmp_path):
     assert same["dssim"] == 0.0 and same["psnr"] is None
     diff = harness.image_quality([(str(tmp_path / "a.png"), str(tmp_path / "b.png"))])
     assert 0 < diff["dssim"] < diff["dssim_face"] and diff["psnr"] > 0
+
+
+def test_per_identity_targets_keep_the_protected_and_clean_sets():
+    counts = fake_counts()
+    shared = harness.select_identities(counts, seed=0, n_protected=4, n_clean=3, train_per_id=10, test_per_id=5)
+    per_id = harness.select_identities(counts, seed=0, n_protected=4, n_clean=3, train_per_id=10, test_per_id=5,
+                                       n_targets=4)
+    assert [i.name for i in shared.protected] == [i.name for i in per_id.protected]
+    assert [i.name for i in shared.clean] == [i.name for i in per_id.clean]
+    assert len(shared.targets) == 1 and len(per_id.targets) == 4
+    assert per_id.targets[0].name == shared.targets[0].name
+    names = [i.name for i in per_id.protected + per_id.clean + per_id.targets]
+    assert len(set(names)) == len(names)
+    assert per_id.target_for(3) is per_id.targets[3]
+    assert shared.target_for(3) is shared.targets[0]
+
+
+def test_parse_cloak_args():
+    assert harness.parse_cloak_args(["steps=120", "self_weight=1.0", "models=a,b", "name=x"]) == {
+        "steps": 120, "self_weight": 1.0, "models": ["a", "b"], "name": "x"}
+    assert harness.parse_cloak_args(None) == {}

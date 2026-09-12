@@ -107,3 +107,32 @@ def test_cloak_is_deterministic_for_a_seed():
     r1 = cloak.Cloaker(surrogates, p).cloak(crops, targets)
     r2 = cloak.Cloaker(surrogates, p).cloak(crops, targets)
     np.testing.assert_array_equal(r1.images[0], r2.images[0])
+
+
+def test_self_penalty_lowers_similarity_to_own_face():
+    surrogates = {"a": DummySurrogate(1), "b": DummySurrogate(2)}
+    common = dict(steps=40, lr=2.0, eps=10.0, dssim_budget=0.02, eot_samples=0, stop_cos=1.01, patience=40, batch_size=4)
+    crops = _crops(2)
+    target_crop = align.make_crop(_face_photo(seed=9), BBOX, KPS)
+    residual = {}
+    for self_weight in (0.0, 3.0):
+        cl = cloak.Cloaker(surrogates, cloak.CloakParams(self_weight=self_weight, **common))
+        targets = {k: v[0] for k, v in cl.embed([target_crop]).items()}
+        before = cl.embed(crops)
+        result = cl.cloak(crops, targets)
+        after = cl.embed([align.FaceCrop(box=c.box, scale=c.scale, image=img, kps=c.kps)
+                          for c, img in zip(crops, result.images)])
+        residual[self_weight] = np.mean([(before[k] * after[k]).sum(axis=1).mean() for k in surrogates])
+        assert (result.dssim <= 0.02 * 1.05 + 1e-4).all()
+    assert residual[3.0] < residual[0.0]
+
+
+def test_laggard_weighting_runs_and_reaches_target():
+    surrogates = {"a": DummySurrogate(1), "b": DummySurrogate(2)}
+    params = cloak.CloakParams(steps=30, lr=2.0, eps=10.0, dssim_budget=0.02, eot_samples=1, laggard=0.1,
+                               self_weight=1.0, stop_cos=1.01, patience=30, batch_size=4)
+    cl = cloak.Cloaker(surrogates, params)
+    crops = _crops(2)
+    targets = {k: v[0] for k, v in cl.embed([align.make_crop(_face_photo(seed=9), BBOX, KPS)]).items()}
+    result = cl.cloak(crops, targets)
+    assert result.cos.shape == (2, 2) and (result.cos > 0.3).all()
