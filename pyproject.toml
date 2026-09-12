@@ -25,9 +25,6 @@ dependencies = [
     "opencv-python-headless>=4.9",
     "huggingface_hub>=0.23",
     "safetensors>=0.4",
-    # transitional: the TF pipeline stays until the torch pipeline replaces it
-    "tensorflow>=2.16",
-    "mtcnn>=1.0",
 ]
 
 [project.optional-dependencies]

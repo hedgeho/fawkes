@@ -1,9 +1,8 @@
 """Smoke tests for fawkes.
 
-Fast tests need no downloads. Tests that need the feature-extractor models
-(about 300 MB) run only if the models are already in fawkes/model/ or
-FAWKES_TEST_DOWNLOAD=1 is set. Face-detection tests need real photos; point
-FAWKES_TEST_IMAGES at a directory of face images to enable them.
+Fast tests need no downloads. Tests that need real photos run when FAWKES_TEST_IMAGES points to a
+directory of face images; tests that need the surrogate weights run when they are already in
+fawkes/model/ (see `python -m fawkes.models download`).
 """
 import glob
 import os
@@ -14,15 +13,9 @@ from PIL import Image
 
 import fawkes
 from fawkes import utils
-from fawkes.align_face import align, aligner
-from fawkes.protection import Fawkes
+from fawkes.protection import Fawkes, MODES
 
-MODEL_DIR = os.path.join(os.path.dirname(fawkes.__file__), "model")
-HAVE_MODELS = (os.path.exists(os.path.join(MODEL_DIR, "extractor_2.h5"))
-               or os.environ.get("FAWKES_TEST_DOWNLOAD") == "1")
 IMAGE_DIR = os.environ.get("FAWKES_TEST_IMAGES")
-
-needs_models = pytest.mark.skipif(not HAVE_MODELS, reason="extractor models not downloaded")
 needs_images = pytest.mark.skipif(not IMAGE_DIR, reason="FAWKES_TEST_IMAGES not set")
 
 
@@ -30,23 +23,9 @@ def _random_image(shape=(112, 112, 3), seed=0):
     return np.random.RandomState(seed).uniform(0, 255, shape).astype(np.float32)
 
 
-def _smooth_image():
-    """A smooth gradient with a soft blob; SSIM behaves sensibly on it, noise does not."""
-    y, x = np.mgrid[0:112, 0:112].astype(np.float32) / 111.0
-    img = np.stack([60 + 150 * x, 80 + 120 * y, 200 - 100 * (x * y)], -1)
-    img += 25 * np.exp(-((x - 0.5) ** 2 + (y - 0.4) ** 2) / 0.02)[..., None]
-    return np.clip(img, 0, 255)
-
-
-def test_get_ends_centres_window():
-    assert utils.get_ends(10, 4) == (3, 7)
-    assert utils.get_ends(5, 5) == (0, 5)
-
-
-def test_resize_changes_shape_and_keeps_range():
-    out = utils.resize(_random_image((40, 60, 3)), (112, 112))
-    assert out.shape == (112, 112, 3)
-    assert out.min() >= 0 and out.max() <= 255
+def _have_surrogates(keys):
+    from fawkes.models import SURROGATES, model_dir
+    return all((model_dir() / k / SURROGATES[k].filename).exists() for k in keys)
 
 
 def test_load_image_applies_exif_orientation(tmp_path):
@@ -69,105 +48,77 @@ def test_filter_image_paths_skips_non_images(tmp_path):
     assert images[0].shape == (16, 16, 3)
 
 
-def test_faces_no_align_uses_whole_image():
-    img = _random_image((80, 120, 3))
-    faces = utils.Faces(["x.png"], [img], aligner=None, verbose=0, no_align=True)
-    assert faces.cropped_faces.shape == (1, 112, 112, 3)
-    protected = np.clip(faces.cropped_faces + 10, 0, 255)
-    merged, missing = faces.merge_faces(protected, faces.cropped_faces)
-    assert missing == []
-    assert merged[0].shape == img.shape, "cloak must be merged back at the original size"
-    assert 0 <= merged[0].min() and merged[0].max() <= 255
-    assert 0 < np.abs(merged[0] - img).mean() <= 10
+def test_dump_image_roundtrip(tmp_path):
+    img = _random_image((20, 30, 3))
+    utils.dump_image(img, str(tmp_path / "x.png"))
+    back = utils.load_image(str(tmp_path / "x.png"))
+    assert np.abs(back - img.round()).max() == 0
+    utils.dump_image(img, str(tmp_path / "x.jpg"), format="jpeg")
+    assert utils.load_image(str(tmp_path / "x.jpg")).shape == (20, 30, 3)
 
 
-def test_hash_file_auto_detects_algorithm(tmp_path):
-    f = tmp_path / "blob"
-    f.write_bytes(b"fawkes")
-    md5 = utils._hash_file(str(f), "md5")
-    assert utils.validate_file(str(f), md5, algorithm="auto")
-    sha = utils._hash_file(str(f), "sha256")
-    assert utils.validate_file(str(f), sha, algorithm="auto")
-
-
-def test_sanitize_legacy_config_strips_groups():
-    cfg = {"layers": [
-        {"class_name": "Functional", "config": {"layers": [
-            {"class_name": "DepthwiseConv2D", "config": {"groups": 1, "kernel_size": [3, 3]}}]}},
-        {"class_name": "Conv2D", "config": {"groups": 1}},
-    ]}
-    utils._sanitize_legacy_config(cfg)
-    assert "groups" not in cfg["layers"][0]["config"]["layers"][0]["config"]
-    assert cfg["layers"][1]["config"]["groups"] == 1
-
-
-def test_faces_marks_images_without_a_face():
-    noise = _random_image((160, 160, 3), seed=3)
-    faces = utils.Faces(["noise.png"], [noise], aligner(), verbose=0)
-    assert len(faces.cropped_faces) == 0
-    assert faces.images_without_face == [0]
-
-
-def test_mode_validation_happens_before_any_model_loads():
-    with pytest.raises(ValueError, match="custom"):
-        Fawkes(gpu=None, mode="custom", th=0.01)
+def test_argument_validation_happens_before_any_model_loads(tmp_path):
     with pytest.raises(ValueError, match="mode must be one of"):
-        Fawkes(gpu=None, mode="min")
+        Fawkes(mode="min", target_dir=str(tmp_path))
+    with pytest.raises(ValueError, match="target_dir is required"):
+        Fawkes(mode="low")
+    with pytest.raises(ValueError, match="not a directory"):
+        Fawkes(mode="low", target_dir=str(tmp_path / "missing"))
+    with pytest.raises(ValueError, match="unknown surrogate"):
+        Fawkes(mode="low", target_dir=str(tmp_path), models=["nope"])
 
 
 def test_named_modes_define_all_parameters():
-    from fawkes.protection import MODES
+    from fawkes.models import SURROGATES
     for name, params in MODES.items():
-        assert set(params) == {"th", "max_step", "lr", "sd", "extractors"}, name
+        assert {"models", "steps", "eps", "dssim_budget", "eot_samples", "stop_cos"} <= set(params), name
+        assert all(m in SURROGATES for m in params["models"]), name
+
+
+def test_mode_overrides_are_applied(tmp_path):
+    f = Fawkes(mode="mid", target_dir=str(tmp_path), steps=3, eps=5.0, dssim_budget=0.02, eot_samples=0,
+               models=["adaface_ir101"])
+    assert f.params.steps == 3 and f.params.eps == 5.0 and f.params.dssim_budget == 0.02
+    assert f.params.eot_samples == 0 and f.model_keys == ["adaface_ir101"]
+
+
+def test_run_protection_without_images_returns_3(tmp_path):
+    (tmp_path / "t").mkdir()
+    assert Fawkes(mode="low", target_dir=str(tmp_path / "t")).run_protection([]) == 3
+
+
+def test_version_is_v2():
+    assert fawkes.__version__.startswith("2.")
 
 
 @needs_images
-def test_align_detects_faces_and_merge_roundtrips():
+@pytest.mark.skipif(not _have_surrogates(MODES["low"]["models"]), reason="low-mode surrogate not downloaded")
+def test_end_to_end_low_mode(tmp_path):
+    """Detect, build a target from the photos themselves, cloak, and write outputs."""
+    from fawkes.detect import Detector
     paths = [p for p in sorted(glob.glob(os.path.join(IMAGE_DIR, "*"))) if "_cloaked" not in p]
-    paths, images = utils.filter_image_paths(paths)
-    assert paths, "no images found in FAWKES_TEST_IMAGES"
-    cropped, boxes = align(images[0], aligner())
-    assert len(cropped) >= 1
-    assert all(c.shape[0] >= 30 and c.shape[1] >= 30 for c in cropped)
+    assert paths, "no images in FAWKES_TEST_IMAGES"
+    work = tmp_path / "imgs"
+    work.mkdir()
+    target = tmp_path / "target"
+    target.mkdir()
+    # a real face as the target: crop the first detected face out of the first photo
+    img = utils.load_image(paths[0])
+    face = Detector().detect(img)[0]
+    x1, y1, x2, y2 = [int(v) for v in face.bbox]
+    m = int(0.4 * (x2 - x1))
+    utils.dump_image(img[max(0, y1 - m):y2 + m, max(0, x1 - m):x2 + m], str(target / "t.png"))
+    utils.dump_image(img, str(work / "a.png"))
 
-    faces = utils.Faces(paths[:1], images[:1], aligner(), verbose=0)
-    merged, missing = faces.merge_faces(faces.cropped_faces, faces.cropped_faces)
-    assert missing == []
-    np.testing.assert_allclose(merged[0], images[0], atol=1e-3)
-
-
-@needs_models
-@pytest.mark.parametrize("name", ["extractor_2", "extractor_0"])
-def test_extractors_load_and_embed(name):
-    extractor = utils.load_extractor(name)
-    emb = np.asarray(extractor(_random_image((2, 112, 112, 3))))
-    assert emb.shape == (2, 512)
-    np.testing.assert_allclose(np.linalg.norm(emb, axis=1), 1.0, atol=1e-5)
-    assert np.isfinite(emb).all()
-
-
-@needs_models
-def test_custom_mode_uses_given_parameters():
-    protector = Fawkes(gpu=None, mode="custom", th=0.02, max_step=7, lr=3, sd=1e5)
-    assert (protector.th, protector.max_step, protector.lr, protector.sd) == (0.02, 7, 3, 1e5)
-    assert len(protector.feature_extractors_ls) == 2
-
-
-@needs_models
-def test_end_to_end_no_align(tmp_path):
-    src = tmp_path / "face.png"
-    Image.fromarray(_smooth_image().astype(np.uint8)).save(src)
-
-    protector = Fawkes(gpu=None, mode="low")
-    protector.max_step = 3
-    status = protector.run_protection([str(src)], batch_size=1, format="png", no_align=True)
-    assert status == 1
-
-    out = tmp_path / "face_cloaked.png"
-    assert out.exists()
-    cloaked = np.asarray(Image.open(out).convert("RGB")).astype(np.float32)
-    original = np.asarray(Image.open(src).convert("RGB")).astype(np.float32)
-    assert cloaked.shape == original.shape
-    diff = np.abs(cloaked - original)
-    assert diff.max() > 0, "no cloak was applied"
-    assert diff.max() <= 20, "cloak exceeds the per-pixel clip range"
+    # the target is the same person, so disable early stopping to force a perturbation
+    protector = Fawkes(mode="low", target_dir=str(target), steps=3, batch_size=2, stop_cos=1.01)
+    assert protector.run_protection([str(work / "a.png")], debug=True) == 1
+    out = utils.load_image(str(work / "a_cloaked.png"))
+    assert out.shape == img.shape
+    diff = np.abs(out - img)
+    assert diff.max() > 0 and diff.max() <= MODES["low"]["eps"] + 1
+    assert (target / "fawkes_target.npz").exists()
+    # second run reuses the saved target and is deterministic
+    protector2 = Fawkes(mode="low", target_dir=str(target), steps=3, batch_size=2, stop_cos=1.01)
+    assert protector2.run_protection([str(work / "a.png")]) == 1
+    np.testing.assert_array_equal(utils.load_image(str(work / "a_cloaked.png")), out)

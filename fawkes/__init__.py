@@ -4,15 +4,13 @@
 # @Link    : https://www.shawnshan.com/
 
 
-__version__ = '1.0.2'
+__version__ = '2.0.0a1'
 
-from .differentiator import FawkesMaskGeneration
 from .protection import main, Fawkes, MODES
-from .utils import load_extractor, init_gpu, dump_image, Faces, get_file, filter_image_paths
+from .utils import dump_image, filter_image_paths, load_image
 
 __all__ = (
     '__version__',
-    'FawkesMaskGeneration', 'load_extractor',
-    'init_gpu', 'dump_image',
-    'Faces', 'get_file', 'filter_image_paths', 'main', 'Fawkes', 'MODES'
+    'main', 'Fawkes', 'MODES',
+    'dump_image', 'filter_image_paths', 'load_image',
 )
