@@ -40,6 +40,10 @@ CONFIGS=(
   "P|high|--cloak-arg self_weight=3.0 --cloak-arg laggard=0.1 --cloak-arg steps=200 --cloak-arg stop_cos=0.99|jpeg"
   "Q|high|--cloak-arg self_weight=3.0 --cloak-arg laggard=0.1 --cloak-arg steps=200 --cloak-arg stop_cos=0.99 --cloak-arg eps=20 --cloak-arg dssim_budget=0.02|"
   "R|mid|--cloak-arg self_weight=2.0 --cloak-arg laggard=0.1 --cloak-arg eps=16 --cloak-arg steps=120 --cloak-arg stop_cos=0.99|"
+  # Round 3: what a fast (no EOT) mode can do at the mid budget; the low mode itself is measured by hpc/harness.sh
+  "T|low|--cloak-arg self_weight=1.0 --cloak-arg models=adaface_ir101|"
+  "U|low|--cloak-arg self_weight=1.0 --cloak-arg models=adaface_ir101,arcface_r100,lvface_b|"
+  "V|low|--cloak-arg self_weight=2.0 --cloak-arg steps=60 --cloak-arg eot_samples=2|"
 )
 want=("$@")
 for cfg in "${CONFIGS[@]}"; do
