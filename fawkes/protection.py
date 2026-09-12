@@ -18,8 +18,8 @@ from fawkes.utils import dump_image, filter_image_paths
 # furthest from the target; stop_cos: a face is done once every surrogate sees the target at this
 # cosine. Tuned with eval/harness.py on 2026-09-12 (see docs/DECISIONS.md, decision 10).
 MODES = {
-    'low': dict(models=["adaface_ir101", "arcface_r100"], steps=40, eps=16.0, dssim_budget=0.012,
-                eot_samples=0, self_weight=2.0, stop_cos=0.9),
+    'low': dict(models=["adaface_ir101", "arcface_r100"], steps=60, eps=16.0, dssim_budget=0.012,
+                eot_samples=2, self_weight=2.0, stop_cos=0.9),
     'mid': dict(models=["arcface_r100", "adaface_ir101", "lvface_b"], steps=60, eps=16.0,
                 dssim_budget=0.012, eot_samples=2, self_weight=1.0, stop_cos=0.9),
     'high': dict(models=["arcface_r100", "adaface_ir101", "lvface_b"], steps=200, eps=16.0,

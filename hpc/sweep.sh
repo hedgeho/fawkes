@@ -44,6 +44,10 @@ CONFIGS=(
   "T|low|--cloak-arg self_weight=1.0 --cloak-arg models=adaface_ir101|"
   "U|low|--cloak-arg self_weight=1.0 --cloak-arg models=adaface_ir101,arcface_r100,lvface_b|"
   "V|low|--cloak-arg self_weight=2.0 --cloak-arg steps=60 --cloak-arg eot_samples=2|"
+  # Round 4: the robustness views turned out to drive transfer (V vs the no-EOT low); more of them?
+  "W|mid|--cloak-arg eot_samples=5|"
+  "X|high|--cloak-arg eot_samples=5|"
+  "Y|mid|--cloak-arg eot_samples=5 --cloak-arg steps=90|"
 )
 want=("$@")
 for cfg in "${CONFIGS[@]}"; do

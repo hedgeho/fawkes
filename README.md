@@ -44,15 +44,19 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
 * `-m`, `--mode`: `low`, `mid` (default) or `high`, the tradeoff between protection strength,
   visible change and run time:
 
-  | mode | surrogates | steps | max pixel change | DSSIM budget | robustness copies |
-  |---|---|---|---|---|---|
-  | low | AdaFace IR-101 | 30 | 10 | 0.008 | none |
-  | mid | ArcFace IR-100, AdaFace IR-101, LVFace-B | 60 | 12 | 0.012 | blur, resize, JPEG |
-  | high | same three | 120 | 16 | 0.017 | blur, resize, JPEG |
+  | mode | surrogates | steps | max pixel change | DSSIM budget | robustness views | s / face, 8-core CPU |
+  |---|---|---|---|---|---|---|
+  | low | AdaFace IR-101, ArcFace IR-100 | 40 | 16 | 0.012 | none | 20 |
+  | mid | + LVFace-B | 60 | 16 | 0.012 | blur, resize, JPEG | 56 |
+  | high | same three | 200 | 16 | 0.017 | blur, resize, JPEG | about 190 |
+
+  Every mode also penalises what is left of your own identity in the cloaked face
+  (`--self-weight`, see [docs/DECISIONS.md](docs/DECISIONS.md#10-penalise-the-residual-similarity-to-the-own-face-not-only-the-distance-to-the-target)).
+  On a CUDA GPU all modes take a second or two per face.
 
 * `--models`: comma-separated surrogate keys overriding the mode (`python -m fawkes.models list`).
-* `--steps`, `--eps`, `--th`, `--no-eot`: override the mode's steps, pixel bound, DSSIM budget and
-  robustness copies.
+* `--steps`, `--eps`, `--th`, `--no-eot`, `--self-weight`: override the mode's steps, pixel bound,
+  DSSIM budget, robustness views and residual penalty.
 * `--batch-size`: faces optimised together (default 8; larger batches are faster per face).
 * `--threads`: CPU threads for PyTorch.
 * `--no-align`: the inputs are already 112x112 aligned faces; skip detection.
@@ -73,9 +77,9 @@ embedding is cached in `<target-dir>/fawkes_target.npz` after the first run.
 
 ### Tips
 
-- Run time on an 8-core CPU without a GPU is roughly 5 s per face in `low` and about a minute per
-  face in `mid`; batching several faces is faster per face. A CUDA GPU is used automatically when
-  PyTorch finds one.
+- Run time on an 8-core CPU without a GPU is about 20 s per face in `low` and a minute per face in
+  `mid`; batching several faces is faster per face. A CUDA GPU is used automatically when PyTorch
+  finds one (install with the `cu128` extra).
 - Most of your published photos need to be cloaked for the protection to work; a recogniser trained
   on mostly clean photos of you learns your real face regardless.
 - Cloaks survive JPEG re-encoding by design, but do not resize or filter the output more than a
