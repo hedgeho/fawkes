@@ -22,13 +22,13 @@ class CloakParams:
     eps: float = 12.0  # L-inf bound on the perturbation, [0, 255] units
     dssim_budget: float = 0.012  # mean DSSIM allowed on the crop
     dssim_weight: float = 100.0  # penalty per unit of DSSIM above the budget
-    eot_samples: int = 2  # augmented copies per step, 0 disables EOT
+    eot_samples: int = 2  # augmented views cycled between clean steps, 0 disables EOT
     kps_jitter: float = 2.0  # px, random landmark offsets (detector disagreement)
     blur_sigma_max: float = 1.5
     resize_min: float = 0.7
     jpeg_quality: tuple = (60, 95)
     stop_cos: float = 0.75  # stop a face once every surrogate is this close to the target
-    patience: int = 10  # stop a face when its clean loss has not improved for this many steps
+    patience: int = 10  # stop a face when its clean loss has not improved for this many clean steps
     seed: int = 0
     batch_size: int = 8
 
@@ -274,20 +274,23 @@ class Cloaker:
         active = torch.ones(n, dtype=torch.bool)
         steps_run = torch.zeros(n, dtype=torch.long)
 
+        # Stochastic EOT: each step takes one gradient pass through one view of the batch, cycling
+        # through the clean alignment and `eot_samples` augmented views; bookkeeping and early
+        # stopping use the clean steps only.
+        views = 1 + p.eot_samples
         for step in range(p.steps):
+            clean_step = step % views == 0
             x = (images + delta * mask).clamp(0, 255)
-            aligned = warp_to_template(x / 255.0, clean_m)
-            feat_loss, cosines = self._feature_loss(aligned, target_vecs)
-            total = feat_loss
-            for _ in range(p.eot_samples):
+            if clean_step:
+                aligned = warp_to_template(x / 255.0, clean_m)
+            else:
                 jitter = rng.uniform(-p.kps_jitter, p.kps_jitter, size=(n, 5, 2)).astype(np.float32)
                 m = np.stack([estimate_norm(c.kps + jitter[i]) for i, c in enumerate(crops)])
-                aug = self._augment(warp_to_template(x / 255.0, m), rng)
-                total = total + self._feature_loss(aug, target_vecs)[0]
-            total = total / (1 + p.eot_samples)
+                aligned = self._augment(warp_to_template(x / 255.0, m), rng)
+            feat_loss, cosines = self._feature_loss(aligned, target_vecs)
             d = dssim(x, images, mask)
             penalty = p.dssim_weight * F.relu(d - p.dssim_budget)
-            loss = ((total + penalty) * active.float()).sum()
+            loss = ((feat_loss + penalty) * active.float()).sum()
 
             opt.zero_grad()
             loss.backward()
@@ -296,23 +299,23 @@ class Cloaker:
             with torch.no_grad():
                 delta.clamp_(-p.eps, p.eps)
                 delta.mul_(mask)
-
-                # best-so-far bookkeeping on the clean alignment, within budget only
-                within = d.detach() <= p.dssim_budget * 1.05
-                improved = active & within & (feat_loss.detach() < best_loss)
-                best_loss = torch.where(improved, feat_loss.detach(), best_loss)
-                best_cos[improved] = cosines.detach()[improved]
-                best_dssim[improved] = d.detach()[improved]
-                # delta was just updated; keep the pre-update state that produced this loss
-                best_delta[improved] = (x - images).detach()[improved]
-                since_improved = torch.where(improved, torch.zeros_like(since_improved), since_improved + 1)
                 steps_run[active] = step + 1
-                reached = within & (cosines.detach().min(dim=1).values >= p.stop_cos)
-                active = active & ~reached & (since_improved < p.patience)
+                if clean_step:
+                    # best-so-far bookkeeping on the clean alignment, within budget only
+                    within = d.detach() <= p.dssim_budget * 1.05
+                    improved = active & within & (feat_loss.detach() < best_loss)
+                    best_loss = torch.where(improved, feat_loss.detach(), best_loss)
+                    best_cos[improved] = cosines.detach()[improved]
+                    best_dssim[improved] = d.detach()[improved]
+                    # delta was just updated; keep the pre-update state that produced this loss
+                    best_delta[improved] = (x - images).detach()[improved]
+                    since_improved = torch.where(improved, torch.zeros_like(since_improved), since_improved + 1)
+                    reached = within & (cosines.detach().min(dim=1).values >= p.stop_cos)
+                    active = active & ~reached & (since_improved < p.patience)
 
             if self.verbose:
-                print("step {:3d} loss {:.3f} cos {} dssim {}".format(
-                    step + 1, float(feat_loss.mean()),
+                print("step {:3d} {} loss {:.3f} cos {} dssim {}".format(
+                    step + 1, "clean" if clean_step else "aug  ", float(feat_loss.detach().mean()),
                     np.round(cosines.detach().min(dim=1).values.numpy(), 3),
                     np.round(d.detach().numpy(), 4)))
             if not active.any():
