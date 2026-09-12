@@ -200,6 +200,8 @@ class Cloaker:
         self.surrogates = dict(surrogates)
         self.params = params or CloakParams()
         self.verbose = verbose
+        devices = {next(m.parameters()).device for m in self.surrogates.values() if any(True for _ in m.parameters())}
+        self.device = devices.pop() if devices else torch.device("cpu")
 
     @property
     def keys(self):
@@ -213,6 +215,7 @@ class Cloaker:
         for start in range(0, len(crops), p.batch_size):
             batch = crops[start:start + p.batch_size]
             images, _ = _stack_crops(batch)
+            images = images.to(self.device)
             m = np.stack([c.matrix for c in batch])
             aligned = warp_to_template(images / 255.0, m)
             for k, model in self.surrogates.items():
@@ -260,19 +263,21 @@ class Cloaker:
     def _cloak_batch(self, crops, targets, rng):
         p = self.params
         n = len(crops)
+        dev = self.device
         images, mask = _stack_crops(crops)
-        target_vecs = {k: torch.as_tensor(np.asarray(targets[k], np.float32)) for k in self.surrogates}
+        images, mask = images.to(dev), mask.to(dev)
+        target_vecs = {k: torch.as_tensor(np.asarray(targets[k], np.float32), device=dev) for k in self.surrogates}
         clean_m = np.stack([c.matrix for c in crops])
         delta = torch.zeros_like(images, requires_grad=True)
         opt = torch.optim.Adam([delta], lr=p.lr)
 
         best_delta = torch.zeros_like(images)
-        best_loss = torch.full((n,), float('inf'))
-        best_cos = torch.zeros(n, len(self.surrogates))
-        best_dssim = torch.zeros(n)
-        since_improved = torch.zeros(n, dtype=torch.long)
-        active = torch.ones(n, dtype=torch.bool)
-        steps_run = torch.zeros(n, dtype=torch.long)
+        best_loss = torch.full((n,), float('inf'), device=dev)
+        best_cos = torch.zeros(n, len(self.surrogates), device=dev)
+        best_dssim = torch.zeros(n, device=dev)
+        since_improved = torch.zeros(n, dtype=torch.long, device=dev)
+        active = torch.ones(n, dtype=torch.bool, device=dev)
+        steps_run = torch.zeros(n, dtype=torch.long, device=dev)
 
         # Stochastic EOT: each step takes one gradient pass through one view of the batch, cycling
         # through the clean alignment and `eot_samples` augmented views; bookkeeping and early
@@ -316,8 +321,8 @@ class Cloaker:
             if self.verbose:
                 print("step {:3d} {} loss {:.3f} cos {} dssim {}".format(
                     step + 1, "clean" if clean_step else "aug  ", float(feat_loss.detach().mean()),
-                    np.round(cosines.detach().min(dim=1).values.numpy(), 3),
-                    np.round(d.detach().numpy(), 4)))
+                    np.round(cosines.detach().min(dim=1).values.cpu().numpy(), 3),
+                    np.round(d.detach().cpu().numpy(), 4)))
             if not active.any():
                 break
 
@@ -331,9 +336,9 @@ class Cloaker:
                 best_cos[never] = cosines[never]
                 best_dssim[never] = dssim(x, images, mask)[never]
 
-        final = (images + best_delta).clamp(0, 255)
+        final = (images + best_delta).clamp(0, 255).cpu()
         out = []
         for i, c in enumerate(crops):
             h, w = c.image.shape[:2]
             out.append(final[i, :, :h, :w].permute(1, 2, 0).numpy().astype(np.float32))
-        return out, best_cos.numpy(), best_dssim.numpy(), steps_run.numpy()
+        return out, best_cos.cpu().numpy(), best_dssim.cpu().numpy(), steps_run.cpu().numpy()

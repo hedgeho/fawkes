@@ -19,7 +19,6 @@ classifiers = [
 dependencies = [
     "numpy>=1.26",
     "pillow>=10.0",
-    "torch>=2.4",
     "insightface>=0.7",
     "onnxruntime>=1.18",
     "opencv-python-headless>=4.9",
@@ -29,6 +28,10 @@ dependencies = [
 
 [project.optional-dependencies]
 eval = ["scikit-learn>=1.4"]
+# torch lives in one of these two extras so a CPU box never downloads the CUDA libraries:
+# `uv sync --extra cpu` without a GPU, `uv sync --extra cu128` with CUDA (pip users: pip install '.[cpu]')
+cpu = ["torch>=2.4"]
+cu128 = ["torch>=2.4"]
 
 [project.urls]
 Homepage = "https://github.com/Shawn-Shan/fawkes"
@@ -43,14 +46,22 @@ packages = ["fawkes"]
 version = { attr = "fawkes.__version__" }
 
 [tool.uv]
-required-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+conflicts = [[{ extra = "cpu" }, { extra = "cu128" }]]
 
 [tool.uv.sources]
-torch = { index = "pytorch-cpu" }
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu128", extra = "cu128" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [dependency-groups]

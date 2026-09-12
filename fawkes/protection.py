@@ -26,7 +26,8 @@ MODES = {
 
 class Fawkes(object):
     def __init__(self, mode="mid", target_dir=None, models=None, steps=None, eps=None, dssim_budget=None,
-                 eot_samples=None, stop_cos=None, threads=None, seed=0, batch_size=8, verbose=False):
+                 eot_samples=None, stop_cos=None, threads=None, seed=0, batch_size=8, verbose=False,
+                 device=None):
         if mode not in MODES:
             raise ValueError("mode must be one of {}, got {!r}".format(", ".join(repr(m) for m in MODES), mode))
         if target_dir is None:
@@ -50,6 +51,8 @@ class Fawkes(object):
         if threads:
             torch.set_num_threads(int(threads))
 
+        from fawkes.models import default_device
+        self.device = device or default_device()
         self.mode = mode
         self.target_dir = target_dir
         self.model_keys = params.pop("models")
@@ -72,7 +75,7 @@ class Fawkes(object):
     def cloaker(self):
         if self._cloaker is None:
             from fawkes.models import load_surrogate
-            surrogates = {k: load_surrogate(k) for k in self.model_keys}
+            surrogates = {k: load_surrogate(k, self.device) for k in self.model_keys}
             self._cloaker = Cloaker(surrogates, self.params, verbose=self.verbose)
         return self._cloaker
 
@@ -163,6 +166,8 @@ def main(*argv):
                         help='skip the blur/resize/JPEG robustness copies (faster, less robust)')
     parser.add_argument('--batch-size', type=int, default=8, help="number of faces optimised together")
     parser.add_argument('--threads', type=int, default=None, help='CPU threads for torch')
+    parser.add_argument('--device', type=str, default=None,
+                        help="torch device for the surrogates, e.g. cuda or cpu (default: cuda if available)")
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--no-align', action='store_true',
                         help="inputs are already 112x112 aligned faces: skip detection and cloak each whole image")
@@ -182,7 +187,7 @@ def main(*argv):
                        models=args.models.split(",") if args.models else None,
                        steps=args.steps, eps=args.eps, dssim_budget=args.th,
                        eot_samples=0 if args.no_eot else None, threads=args.threads, seed=args.seed,
-                       batch_size=args.batch_size, verbose=args.debug)
+                       batch_size=args.batch_size, verbose=args.debug, device=args.device)
     return protector.run_protection(image_paths, format=args.format, no_align=args.no_align, debug=args.debug)
 
 

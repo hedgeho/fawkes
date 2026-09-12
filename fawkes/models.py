@@ -302,19 +302,27 @@ class Recogniser(nn.Module):
         return F.normalize(self.net(x).to(x.dtype), dim=1)
 
 
-def _load_torch(key: str) -> Recogniser:
+def default_device() -> str:
+    """$FAWKES_DEVICE if set, else 'cuda' when available, else 'cpu'."""
+    env = os.environ.get("FAWKES_DEVICE")
+    if env:
+        return env
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _load_torch(key: str, device=None) -> Recogniser:
     s = spec(key)
     if s.kind != "torch":
         raise ValueError(f"{key} is a {s.kind} model, not a torch model")
     net = _ARCHS[s.arch](download(key))
-    return Recogniser(net, s)
+    return Recogniser(net, s).to(device or default_device())
 
 
-def load_surrogate(key: str) -> nn.Module:
-    """Differentiable recogniser in eval mode with frozen parameters (see module docstring)."""
+def load_surrogate(key: str, device=None) -> nn.Module:
+    """Differentiable recogniser in eval mode with frozen parameters, on `device` (default_device())."""
     if key not in SURROGATES:
         raise KeyError(f"{key!r} is not a surrogate; choose from {sorted(SURROGATES)}")
-    return _load_torch(key)
+    return _load_torch(key, device)
 
 
 # --------------------------------------------------------------------------- evaluators
@@ -340,14 +348,15 @@ def _onnx_evaluator(key: str) -> Callable[[np.ndarray], np.ndarray]:
     return embed
 
 
-def _torch_evaluator(key: str) -> Callable[[np.ndarray], np.ndarray]:
-    model = _load_torch(key)
+def _torch_evaluator(key: str, device=None) -> Callable[[np.ndarray], np.ndarray]:
+    model = _load_torch(key, device)
+    dev = next(model.parameters()).device
 
     def embed(imgs: np.ndarray) -> np.ndarray:
         imgs = _check_uint8(imgs, key)
-        x = torch.from_numpy(imgs.astype(np.float32)).permute(0, 3, 1, 2).div_(255.0)
+        x = torch.from_numpy(imgs.astype(np.float32)).permute(0, 3, 1, 2).div_(255.0).to(dev)
         with torch.no_grad():
-            return model(x).numpy()
+            return model(x).cpu().numpy()
 
     return embed
 
@@ -361,12 +370,14 @@ def _check_uint8(imgs: np.ndarray, key: str) -> np.ndarray:
     return imgs
 
 
-def load_evaluator(key: str) -> Callable[[np.ndarray], np.ndarray]:
-    """Forward-only embedder: uint8 (N,112,112,3) RGB -> L2-normalised float32 (N, embed_dim)."""
+def load_evaluator(key: str, device=None) -> Callable[[np.ndarray], np.ndarray]:
+    """Forward-only embedder: uint8 (N,112,112,3) RGB -> L2-normalised float32 (N, embed_dim).
+
+    ONNX evaluators always run on the CPU; torch ones on `device` (default_device())."""
     if key not in EVALUATORS:
         raise KeyError(f"{key!r} is not an evaluator; choose from {sorted(EVALUATORS)}")
     s = EVALUATORS[key]
-    return _onnx_evaluator(key) if s.kind == "onnx" else _torch_evaluator(key)
+    return _onnx_evaluator(key) if s.kind == "onnx" else _torch_evaluator(key, device)
 
 
 # --------------------------------------------------------------------------- CLI
