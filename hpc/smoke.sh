@@ -11,6 +11,7 @@ cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/..}"
 export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
 export UV_CACHE_DIR=/scratch/work/zalessi1/.uv-cache
 export HF_HUB_OFFLINE=1
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
 uv run python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 uv run pytest -q -x
@@ -25,10 +26,10 @@ from PIL import Image
 import numpy as np
 d = fetch_lfw_people(min_faces_per_person=20, color=True, resize=1.0, funneled=True)
 names = list(d.target_names)
-for i, name in enumerate(["George_W_Bush", "Colin_Powell"]):
+for i, name in enumerate(["George W Bush", "Colin Powell"]):
     idx = np.where(d.target == names.index(name))[0][:3]
     for j, k in enumerate(idx):
-        Image.fromarray((d.images[k] * 255).astype(np.uint8)).save(f"out/smoke/imgs/{name}_{j}.png")
+        Image.fromarray((d.images[k] * 255).astype(np.uint8)).save(f"out/smoke/imgs/{name.replace(' ', '_')}_{j}.png")
 PY
 uv run python -m fawkes -d out/smoke/imgs -t out/smoke/target -m mid --debug --batch-size 8
 ls -la out/smoke/imgs

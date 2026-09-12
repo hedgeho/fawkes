@@ -209,9 +209,10 @@ class Evaluator:
 
     def __init__(self, pack):
         from insightface.app import FaceAnalysis
+        from fawkes.models import onnx_session_options
         self.name = pack
         self.app = FaceAnalysis(name=pack, allowed_modules=["detection", "recognition"],
-                                providers=["CPUExecutionProvider"])
+                                providers=["CPUExecutionProvider"], sess_options=onnx_session_options())
         self.app.prepare(ctx_id=-1, det_size=(640, 640))
 
     def embed_one(self, rgb):
@@ -237,7 +238,9 @@ class ExternalEvaluator(Evaluator):
         from fawkes.models import load_evaluator
         self.name = key
         self.model = load_evaluator(key)
-        self.app = FaceAnalysis(name="buffalo_l", allowed_modules=["detection"], providers=["CPUExecutionProvider"])
+        from fawkes.models import onnx_session_options
+        self.app = FaceAnalysis(name="buffalo_l", allowed_modules=["detection"], providers=["CPUExecutionProvider"],
+                                sess_options=onnx_session_options())
         self.app.prepare(ctx_id=-1, det_size=(640, 640))
 
     def embed_one(self, rgb):

@@ -39,7 +39,9 @@ class Detector:
 
     def __init__(self, det_size=640, threshold=0.5, min_size=30):
         from insightface.model_zoo import get_model
-        self.model = get_model(str(detector_path()), providers=['CPUExecutionProvider'])
+        from fawkes.models import onnx_session_options
+        self.model = get_model(str(detector_path()), providers=['CPUExecutionProvider'],
+                               sess_options=onnx_session_options())
         self.model.prepare(ctx_id=-1, input_size=(det_size, det_size), det_thresh=threshold)
         self.min_size = min_size
 

@@ -327,12 +327,25 @@ def load_surrogate(key: str, device=None) -> nn.Module:
 
 # --------------------------------------------------------------------------- evaluators
 
+def onnx_session_options():
+    """SessionOptions with an explicit thread count.
+
+    onnxruntime otherwise sizes its pool from the machine's core count and pins threads, which
+    fails (and is very slow) inside a Slurm cpuset; OMP_NUM_THREADS or 8 threads is plenty."""
+    import onnxruntime as ort
+
+    so = ort.SessionOptions()
+    so.log_severity_level = 3  # the insightface graphs declare batch 1 on the output; batching still works
+    so.intra_op_num_threads = int(os.environ.get("OMP_NUM_THREADS") or min(8, os.cpu_count() or 1))
+    so.inter_op_num_threads = 1
+    return so
+
+
 def _onnx_evaluator(key: str) -> Callable[[np.ndarray], np.ndarray]:
     import onnxruntime as ort
 
     path = download(key)
-    so = ort.SessionOptions()
-    so.log_severity_level = 3  # the insightface graphs declare batch 1 on the output; batching still works
+    so = onnx_session_options()
     sess = ort.InferenceSession(str(path), so, providers=["CPUExecutionProvider"])
     inp = sess.get_inputs()[0]
     out_name = sess.get_outputs()[0].name
