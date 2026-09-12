@@ -11,7 +11,8 @@ uv run python eval/harness.py --cloaker none   --smoke                 # sanity 
 uv run python eval/harness.py --cloaker legacy --mode low --smoke      # TF Fawkes, a few minutes
 uv run python eval/harness.py --cloaker legacy --mode mid              # full baseline, 15-30 min on 8 CPU cores
 uv run python eval/harness.py --cloaker legacy --mode mid --jpeg 75    # same, cloaks re-encoded as JPEG
-uv run python eval/harness.py --cloaker v2 --mode mid                  # new torch pipeline (needs Fawkes(mode=, target_dir=))
+uv run python eval/harness.py --cloaker v2 --mode mid --batch-size 16 # torch pipeline, one target per identity
+uv run python eval/harness.py --cloaker v2 --mode mid --cloak-arg steps=120 --cloak-arg self_weight=1 --tag long
 ```
 
 Flags:
@@ -20,8 +21,12 @@ Flags:
 |---|---|---|
 | `--cloaker {none,legacy,v2}` | `none` | `none` copies the clean photo (protection should be ~0), `legacy` is the TF Fawkes, `v2` the torch pipeline |
 | `--mode` | `mid` | passed to the cloaker |
+| `--batch-size` | 1 | faces the v2 cloaker optimises together (16 on a GPU) |
+| `--cloak-arg NAME=VALUE` | none | repeatable; overrides a `CloakParams` field of the v2 cloaker (`steps`, `eps`, `dssim_budget`, `self_weight`, `laggard`, `stop_cos`, `models=a,b`, ...) |
+| `--shared-target` | off | all protected identities mimic the same target (default: a different target per identity, as with independent users) |
+| `--tag` | none | label added to the results file name and the report header |
 | `--jpeg Q` | off | re-encode every cloaked photo as JPEG quality Q before the adversary sees it (a social-network upload) |
-| `--evaluator KEY` | `buffalo_l`, `antelopev2` | repeatable; built-in keys are insightface packs, any other key goes through `fawkes.models.load_evaluator` |
+| `--evaluator KEY` | `buffalo_l`, `antelopev2` | repeatable; built-in keys are insightface packs, any other key (e.g. `adaface_vit_b`) goes through `fawkes.models.load_evaluator` |
 | `--seed` | 0 | selects identities and the train/test split; everything is deterministic given the seed |
 | `--n-protected`, `--n-clean` | 10, 10 | identities that get cloaked / stay clean |
 | `--train-per-id`, `--test-per-id` | 10, 5 | photos per identity |
@@ -33,15 +38,18 @@ The first run downloads LFW (about 230 MB, cached by scikit-learn in `~/scikit_l
 insightface packs (`~/.insightface/models`). insightface extracts `antelopev2.zip` into a nested
 `antelopev2/antelopev2/` folder and then fails to find it; move the `.onnx` files one level up.
 
-Results go to `eval/results/<timestamp>_<cloaker>_<mode>[_jpegQ][_smoke].json` together with all
-arguments and the identity split, and a markdown table is printed.
+Results go to `eval/results/<timestamp>_<cloaker>_<mode>[_tag][_jpegQ][_smoke].json` together with
+all arguments and the identity split, and a markdown table is printed. `hpc/sweep.sh` runs a list of
+configurations on a Slurm GPU node.
 
 ## Protocol
 
-1. From the LFW identities with at least 20 photos, pick `n_protected + n_clean + 1` identities with
-   the seed. Each identity's photos are split into train and test. The extra identity is the
-   **target** for the v2 cloaker and is written to `<workdir>/_target/`. The photos are the
-   250x250 funneled JPEGs (whole photos, not the 125x94 benchmark crops), materialised as PNGs under
+1. From the LFW identities with at least 20 photos, pick `n_protected + n_clean` identities with
+   the seed, plus one **target** identity per protected identity (or a single one with
+   `--shared-target`); the protected and clean sets do not depend on that choice. Each identity's
+   photos are split into train and test. Targets are written to `<workdir>/_targets/<name>/` and
+   the v2 cloaker's cached target embedding lives there. The photos are the 250x250 funneled JPEGs
+   (whole photos, not the 125x94 benchmark crops), materialised as PNGs under
    `<workdir>/<identity>/<train|test>/<n>.png`.
 2. Only the **train photos of the protected identities** are cloaked; the cloaker writes
    `<n>_cloaked.png` next to each input. A photo the cloaker gives no output for (no face detected)

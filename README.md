@@ -113,14 +113,14 @@ Quick Installation
 ------------------
 
 From a clone of this repository, with [uv](https://docs.astral.sh/uv/) (Python 3.12, locked
-dependencies, CPU-only PyTorch):
+dependencies). PyTorch comes from one of two extras: `cpu` or `cu128` (CUDA 12.8 wheels):
 
 ```
-uv sync
+uv sync --extra cpu          # or: uv sync --extra cu128
 uv run fawkes -d ./imgs -t ./target --mode mid
 ```
 
-Plain `pip install .` also works on Python 3.11 or newer. The face detector (17 MB) and the surrogate
+Plain `pip install torch .` also works on Python 3.11 or newer. The face detector (17 MB) and the surrogate
 weights (about 930 MB for `mid`, 250 MB for `low`) are downloaded from Hugging Face on first use
 into `fawkes/model/`; `python -m fawkes.models download` prefetches them.
 
@@ -139,7 +139,7 @@ Development
 -----------
 
 ```
-uv sync --extra eval
+uv sync --extra cpu --extra eval
 uv run pytest
 ```
 

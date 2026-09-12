@@ -17,27 +17,43 @@ export HF_HUB_OFFLINE=1
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-6}"
 EV=(--evaluator buffalo_l --evaluator antelopev2 --evaluator adaface_vit_b)
 
-# label | mode | extra harness arguments (cloak overrides and flags)
+# label | mode | extra harness arguments (cloak overrides and flags) | "jpeg" to also evaluate a JPEG-75 copy
+# Round 1 (2026-09-12, results in eval/results/*_[A-K].json): the residual penalty (self_weight)
+# is what makes the probe fail; laggard weighting and a larger eps help a little more.
 CONFIGS=(
-  "A|mid|"
-  "B|mid|--cloak-arg self_weight=1.0"
-  "C|mid|--cloak-arg self_weight=1.0 --cloak-arg laggard=0.1"
-  "D|mid|--cloak-arg self_weight=1.0 --cloak-arg steps=120 --cloak-arg stop_cos=0.99"
-  "E|mid|--cloak-arg self_weight=1.0 --cloak-arg eps=16"
-  "F|high|--cloak-arg self_weight=1.0"
-  "G|high|--cloak-arg self_weight=1.0 --cloak-arg steps=200 --cloak-arg stop_cos=0.99"
-  "H|high|--cloak-arg self_weight=2.0 --cloak-arg steps=200 --cloak-arg stop_cos=0.99 --cloak-arg laggard=0.1"
-  "I|high|--cloak-arg self_weight=1.0 --cloak-arg steps=200 --cloak-arg stop_cos=0.99 --cloak-arg eps=20 --cloak-arg dssim_budget=0.02"
-  "J|mid|--cloak-arg self_weight=1.0 --shared-target"
-  "K|high|--cloak-arg self_weight=1.0 --cloak-arg steps=200 --cloak-arg stop_cos=0.99 --shared-target"
+  "A|mid||"
+  "B|mid|--cloak-arg self_weight=1.0|"
+  "C|mid|--cloak-arg self_weight=1.0 --cloak-arg laggard=0.1|"
+  "D|mid|--cloak-arg self_weight=1.0 --cloak-arg steps=120 --cloak-arg stop_cos=0.99|"
+  "E|mid|--cloak-arg self_weight=1.0 --cloak-arg eps=16|"
+  "F|high|--cloak-arg self_weight=1.0|"
+  "G|high|--cloak-arg self_weight=1.0 --cloak-arg steps=200 --cloak-arg stop_cos=0.99|"
+  "H|high|--cloak-arg self_weight=2.0 --cloak-arg steps=200 --cloak-arg stop_cos=0.99 --cloak-arg laggard=0.1|"
+  "I|high|--cloak-arg self_weight=1.0 --cloak-arg steps=200 --cloak-arg stop_cos=0.99 --cloak-arg eps=20 --cloak-arg dssim_budget=0.02|"
+  "J|mid|--cloak-arg self_weight=1.0 --shared-target|"
+  "K|high|--cloak-arg self_weight=1.0 --cloak-arg steps=200 --cloak-arg stop_cos=0.99 --shared-target|"
+  # Round 2: stronger residual penalty, mode candidates with JPEG re-encoding
+  "L|low|--cloak-arg self_weight=2.0|jpeg"
+  "M|low|--cloak-arg self_weight=2.0 --cloak-arg models=adaface_ir101,arcface_r100|"
+  "N|mid|--cloak-arg self_weight=2.0 --cloak-arg laggard=0.1 --cloak-arg eps=16|jpeg"
+  "O|mid|--cloak-arg self_weight=3.0 --cloak-arg laggard=0.1 --cloak-arg eps=16|"
+  "P|high|--cloak-arg self_weight=3.0 --cloak-arg laggard=0.1 --cloak-arg steps=200 --cloak-arg stop_cos=0.99|jpeg"
+  "Q|high|--cloak-arg self_weight=3.0 --cloak-arg laggard=0.1 --cloak-arg steps=200 --cloak-arg stop_cos=0.99 --cloak-arg eps=20 --cloak-arg dssim_budget=0.02|"
+  "R|mid|--cloak-arg self_weight=2.0 --cloak-arg laggard=0.1 --cloak-arg eps=16 --cloak-arg steps=120 --cloak-arg stop_cos=0.99|"
 )
 want=("$@")
 for cfg in "${CONFIGS[@]}"; do
-  IFS='|' read -r label mode extra <<<"$cfg"
+  IFS='|' read -r label mode extra jpeg <<<"$cfg"
   if [ ${#want[@]} -gt 0 ] && [[ ! " ${want[*]} " == *" $label "* ]]; then continue; fi
   echo "=== $label $mode $extra  $(date)"
   # shellcheck disable=SC2086
   uv run python eval/harness.py --cloaker v2 --mode "$mode" --batch-size 16 --tag "$label" \
     --workdir eval/work/sweep "${EV[@]}" $extra
+  if [ "$jpeg" = "jpeg" ]; then
+    echo "=== $label jpeg75  $(date)"
+    # shellcheck disable=SC2086
+    uv run python eval/harness.py --cloaker v2 --mode "$mode" --tag "$label" --jpeg 75 --skip-cloak \
+      --workdir eval/work/sweep "${EV[@]}" $extra
+  fi
 done
 echo "=== done $(date)"
