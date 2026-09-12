@@ -21,3 +21,7 @@ fawkes_dev/protect_personId.txt
 # virtualenv and downloaded models
 .venv/
 fawkes/model/
+
+# evaluation harness data and results
+eval/work/
+eval/results/
