@@ -165,10 +165,10 @@ def cloak_legacy(paths, args, target_dir):
 def cloak_v2(paths, args, target_dir):
     try:
         from fawkes.protection import Fawkes
-        protector = Fawkes(mode=args.mode, target_dir=target_dir)
+        protector = Fawkes(mode=args.mode, target_dir=target_dir, batch_size=args.batch_size)
     except (ImportError, TypeError) as e:
-        raise SystemExit(f"v2 cloaker API (Fawkes(mode=..., target_dir=...)) is not available yet: {e!r}")
-    rc = protector.run_protection(paths, batch_size=args.batch_size)
+        raise SystemExit(f"v2 cloaker API (Fawkes(mode=..., target_dir=...)) is not available: {e!r}")
+    rc = protector.run_protection(paths)
     if rc not in (None, 1):
         print(f"v2 cloaker returned {rc}")
 
