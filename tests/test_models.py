@@ -142,7 +142,7 @@ _cache: dict[str, object] = {}
 
 def _surrogate(key: str):
     if key not in _cache:
-        _cache[key] = models.load_surrogate(key)
+        _cache[key] = models.load_surrogate(key, "cpu")  # parity and gradient checks run on the CPU
     return _cache[key]
 
 

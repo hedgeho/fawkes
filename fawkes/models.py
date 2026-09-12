@@ -417,10 +417,11 @@ def _cmd_bench(keys: list[str], threads: int, batch_sizes: list[int], repeats: i
             print(row, flush=True)
             continue
         model = _load_torch(key)
+        dev = next(model.parameters()).device
         n_params = sum(p.numel() for p in model.parameters())
         row += f"{n_params:10d} {weight_path(key).stat().st_size / 2**20:9.1f} "
         for b in batch_sizes:
-            x = torch.rand(b, 3, INPUT_SIZE, INPUT_SIZE)
+            x = torch.rand(b, 3, INPUT_SIZE, INPUT_SIZE, device=dev)
             with torch.no_grad():
                 model(x)
             t_fwd = min(_timed(lambda: _fwd(model, x)) for _ in range(repeats))
@@ -445,6 +446,8 @@ def _fwd_bwd(model, xg):
 def _timed(fn) -> float:
     t0 = time.perf_counter()
     fn()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
     return time.perf_counter() - t0
 
 
