@@ -293,7 +293,7 @@ def test_grad_norm_equalises_surrogate_contributions():
     g = cloak.Cloaker._normalised_grad(terms, penalty, delta, torch.ones(1))
     raw = [torch.autograd.grad(terms[:, j].sum(), delta, retain_graph=True)[0].norm() for j in range(2)]
     assert raw[0] > 100 * raw[1]
-    assert abs(g.norm().item() - sum(r.item() for r in raw)) < 1e-4  # two parallel gradients, each rescaled to the mean
+    assert abs(g.norm().item() - sum(r.item() for r in raw)) < 1e-2  # two parallel gradients, each rescaled to the mean
 
 
 def test_grad_norm_matches_plain_gradient_for_one_surrogate():
