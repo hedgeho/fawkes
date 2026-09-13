@@ -149,7 +149,9 @@ Model licences
 | arcface_r100 | ArcFace IR-100, MS1MV3 | [InsightFace arcface_torch](https://github.com/deepinsight/insightface/tree/master/recognition/arcface_torch) | non-commercial research |
 | adaface_ir101 | AdaFace IR-101, WebFace12M | [CVLface](https://github.com/mk-minchul/CVLface) | follows WebFace12M (research) |
 | lvface_b | LVFace-B, Glint360K | [ByteDance LVFace](https://github.com/bytedance/LVFace) | non-commercial research |
-| evaluators | w600k_r50, glintr100, AdaFace ViT-B | InsightFace, CVLface | research |
+| lvface_l | LVFace-L (ViT-L), Glint360K | [ByteDance LVFace](https://github.com/bytedance/LVFace) | non-commercial research |
+| lvface_s | LVFace-S (ViT-S), Glint360K, optional | [ByteDance LVFace](https://github.com/bytedance/LVFace) | non-commercial research |
+| evaluators | w600k_r50, glintr100, AdaFace ViT-B, LVFace-T | InsightFace, CVLface, LVFace | research |
 
 Development
 -----------

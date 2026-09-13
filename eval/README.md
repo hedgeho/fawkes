@@ -22,11 +22,11 @@ Flags:
 | `--cloaker {none,legacy,v2}` | `none` | `none` copies the clean photo (protection should be ~0), `legacy` is the TF Fawkes, `v2` the torch pipeline |
 | `--mode` | `mid` | passed to the cloaker |
 | `--batch-size` | 1 | faces the v2 cloaker optimises together (16 on a GPU) |
-| `--cloak-arg NAME=VALUE` | none | repeatable; overrides a `CloakParams` field of the v2 cloaker (`steps`, `eps`, `dssim_budget`, `self_weight`, `laggard`, `stop_cos`, `models=a,b`, ...) |
+| `--cloak-arg NAME=VALUE` | none | repeatable; overrides a `CloakParams` field of the v2 cloaker (`steps`, `eps`, `dssim_budget`, `self_weight`, `laggard`, `stop_cos`, `models=a,b`, the transformer switches `pna`, `tgr`, `sgm`, `token_mask`, `patchout`, `delta_sigma`, `grad_norm`, ...) |
 | `--shared-target` | off | all protected identities mimic the same target (default: a different target per identity, as with independent users) |
 | `--tag` | none | label added to the results file name and the report header |
 | `--jpeg Q` | off | re-encode every cloaked photo as JPEG quality Q before the adversary sees it (a social-network upload) |
-| `--evaluator KEY` | `buffalo_l`, `antelopev2` | repeatable; built-in keys are insightface packs, any other key (e.g. `adaface_vit_b`) goes through `fawkes.models.load_evaluator` |
+| `--evaluator KEY` | `buffalo_l`, `antelopev2` | repeatable; built-in keys are insightface packs, any other key (`adaface_vit_b`, `lvface_t`) goes through `fawkes.models.load_evaluator` |
 | `--seed` | 0 | selects identities and the train/test split; everything is deterministic given the seed |
 | `--n-protected`, `--n-clean` | 10, 10 | identities that get cloaked / stay clean |
 | `--train-per-id`, `--test-per-id` | 10, 5 | photos per identity |
