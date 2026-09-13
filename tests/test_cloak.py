@@ -207,3 +207,100 @@ def test_patchout_cloak_runs_and_moves_toward_target():
     res = cloak.Cloaker(surrogates, params).cloak(crops, targets)
     assert (res.cos[:, 0] > before + 0.05).all()
     assert (res.dssim <= 0.02 * 1.05 + 1e-6).all()
+
+
+@pytest.mark.parametrize("params", [dict(tgr=0.25), dict(sgm=0.6), dict(pna=True, tgr=0.25, sgm=0.6)])
+def test_vit_backward_switches_change_gradient_not_forward(params):
+    model = TinyViT()
+    x = torch.rand(2, 3, 112, 112)
+    target = F.normalize(torch.randn(1, 64), dim=1)
+
+    def run(p):
+        cloak.Cloaker({"vit": model}, cloak.CloakParams(**p))  # applies the switches to the modules
+        xg = x.clone().requires_grad_(True)
+        out = model(xg)
+        (1 - (out * target).sum(dim=1)).sum().backward()
+        return out.detach(), xg.grad.clone()
+
+    o0, g0 = run({})
+    o1, g1 = run(params)
+    assert torch.allclose(o0, o1)
+    assert torch.isfinite(g1).all() and g1.abs().sum() > 0 and not torch.allclose(g0, g1)
+    run({})  # switches reset to the defaults
+    assert all(m.tgr == 0 for m in model.modules() if hasattr(m, "tgr"))
+    assert all(m.sgm == 1.0 for m in model.modules() if hasattr(m, "sgm"))
+
+
+def test_token_mask_only_on_augmented_steps_and_changes_forward():
+    model = TinyViT()
+    x = torch.rand(2, 3, 112, 112)
+    with torch.no_grad():
+        o0 = model(x)
+        model.net.adv_mask_ratio = 0.3
+        torch.manual_seed(0)
+        o1 = model(x)
+        model.net.adv_mask_ratio = 0.0
+        assert torch.allclose(o0, model(x))
+    assert not torch.allclose(o0, o1)
+    cl = cloak.Cloaker({"vit": model}, cloak.CloakParams(token_mask=0.3, steps=4, eot_samples=1))
+    assert model.net.adv_mask_ratio == 0.0
+    crops = _crops(1)
+    targets = {"vit": F.normalize(torch.randn(64), dim=0).numpy()}
+    cl.cloak(crops, targets)
+    assert model.net.adv_mask_ratio == 0.0  # reset after cloaking
+
+
+def test_blurred_delta_is_smooth_and_within_bounds():
+    surrogates = {"a": DummySurrogate(1)}
+    crops = _crops(1)
+    targets = {k: v[0] for k, v in cloak.Cloaker(surrogates).embed(_crops(2)[1:]).items()}
+    common = dict(steps=20, lr=2.0, eps=8.0, dssim_budget=0.05, eot_samples=0, stop_cos=1.0, patience=20)
+    sharp = cloak.Cloaker(surrogates, cloak.CloakParams(**common)).cloak(crops, targets)
+    smooth = cloak.Cloaker(surrogates, cloak.CloakParams(delta_sigma=1.5, **common)).cloak(crops, targets)
+
+    def high_freq(res):
+        d = res.images[0] - crops[0].image
+        return float(np.abs(np.diff(d, axis=0)).mean() + np.abs(np.diff(d, axis=1)).mean())
+
+    assert np.abs(smooth.images[0] - crops[0].image).max() <= 8.0 + 1e-3
+    assert high_freq(smooth) < 0.7 * high_freq(sharp)
+
+
+def test_grad_norm_equalises_surrogate_contributions():
+    class Scaled(nn.Module):
+        def __init__(self, inner, k):
+            super().__init__()
+            self.inner, self.k = inner, k
+
+        def forward(self, x):
+            # same embedding as `inner`, but a much smaller input gradient (as PNA/TGR do)
+            return self.inner(x * self.k + (x - x * self.k).detach())
+
+    base = DummySurrogate(1)
+    surrogates = {"strong": DummySurrogate(2), "weak": Scaled(base, 0.01)}
+    crops = _crops(1)
+    targets = {k: v[0] for k, v in cloak.Cloaker(surrogates).embed(_crops(2)[1:]).items()}
+    common = dict(steps=25, lr=2.0, eps=10.0, dssim_budget=0.03, eot_samples=0, stop_cos=1.0, patience=25)
+    plain = cloak.Cloaker(surrogates, cloak.CloakParams(**common)).cloak(crops, targets)
+    normed = cloak.Cloaker(surrogates, cloak.CloakParams(grad_norm=True, **common)).cloak(crops, targets)
+    # with normalisation the weak surrogate gets its full say and ends closer to the target
+    assert normed.cos[0, 1] > plain.cos[0, 1]
+    assert normed.dssim[0] <= 0.03 * 1.05 + 1e-6
+    # the function itself: each surrogate's rescaled gradient has the mean of the raw norms
+    delta = torch.zeros(1, 3, 40, 40, requires_grad=True)
+    terms = torch.stack([(delta * 3).sum().view(1), (delta * 0.01).flatten().pow(2).sum().view(1) + 0.02 * delta.sum().view(1)], dim=1)
+    penalty = 0.0 * delta.sum().view(1)
+    g = cloak.Cloaker._normalised_grad(terms, penalty, delta, torch.ones(1))
+    raw = [torch.autograd.grad(terms[:, j].sum(), delta, retain_graph=True)[0].norm() for j in range(2)]
+    assert raw[0] > 100 * raw[1]
+    assert abs(g.norm().item() - sum(r.item() for r in raw)) < 1e-4  # two parallel gradients, each rescaled to the mean
+
+
+def test_grad_norm_matches_plain_gradient_for_one_surrogate():
+    surrogates = {"a": DummySurrogate(1)}
+    crops = _crops(2)
+    targets = {k: v[0] for k, v in cloak.Cloaker(surrogates).embed(_crops(3)[2:]).items()}
+    p = dict(steps=6, eot_samples=0, seed=1)
+    r1 = cloak.Cloaker(surrogates, cloak.CloakParams(**p)).cloak(crops, targets)
+    r2 = cloak.Cloaker(surrogates, cloak.CloakParams(grad_norm=True, **p)).cloak(crops, targets)
+    assert np.allclose(r1.images[0], r2.images[0])

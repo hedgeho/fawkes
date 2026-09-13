@@ -32,6 +32,11 @@ class CloakParams:
     stop_cos: float = 0.75  # stop a face once every surrogate is this close to the target
     pna: bool = False  # transformer surrogates: detach the attention maps in the backward pass (PNA)
     patchout: float = 0.0  # >0: each step keeps this fraction of 8x8 gradient blocks (PatchOut-style dropout)
+    tgr: float = 0.0  # >0: transformer token gradient regularisation, scale factor for non-extreme tokens
+    sgm: float = 1.0  # <1: transformer residual-branch gradient decay (skip gradient method)
+    token_mask: float = 0.0  # >0: transformer surrogates drop this fraction of tokens on augmented steps
+    delta_sigma: float = 0.0  # >0: the perturbation is a Gaussian-blurred (sigma px) image of the free variable
+    grad_norm: bool = False  # rescale every surrogate's gradient to the ensemble's mean gradient norm
     patience: int = 10  # stop a face when its clean loss has not improved for this many clean steps
     seed: int = 0
     batch_size: int = 8
@@ -220,10 +225,29 @@ class Cloaker:
         self.verbose = verbose
         devices = {next(m.parameters()).device for m in self.surrogates.values() if any(True for _ in m.parameters())}
         self.device = devices.pop() if devices else torch.device("cpu")
+        p = self.params
         for model in self.surrogates.values():
             for m in model.modules():
                 if hasattr(m, "pna"):
-                    m.pna = bool(self.params.pna)
+                    m.pna = bool(p.pna)
+                if hasattr(m, "tgr"):
+                    m.tgr = float(p.tgr)
+                if hasattr(m, "sgm"):
+                    m.sgm = float(p.sgm)
+        self._set_token_mask(0.0)
+
+    def _set_token_mask(self, ratio):
+        for model in self.surrogates.values():
+            for m in model.modules():
+                if hasattr(m, "adv_mask_ratio"):
+                    m.adv_mask_ratio = ratio
+
+    def _perturbation(self, delta, mask):
+        """The pixel perturbation for the free variable `delta` (blurred when delta_sigma > 0)."""
+        p = self.params
+        if p.delta_sigma > 0:
+            delta = gaussian_blur(delta, p.delta_sigma)
+        return delta * mask
 
     @property
     def keys(self):
@@ -274,7 +298,12 @@ class Cloaker:
         return x
 
     def _feature_loss(self, aligned, target_vecs, self_vecs=None):
-        """(N,) feature loss and (N, n_models) cosines to the target.
+        """(N,) feature loss and (N, n_models) cosines to the target."""
+        per_model, cosines = self._per_model_loss(aligned, target_vecs, self_vecs)
+        return per_model.sum(dim=1), cosines
+
+    def _per_model_loss(self, aligned, target_vecs, self_vecs=None):
+        """(N, n_models) loss terms (summing to the feature loss) and (N, n_models) target cosines.
 
         The loss is the weighted mean over surrogates of (1 - cos to target), plus `self_weight`
         times the positive part of the cosine to the face's own clean embedding: what a later
@@ -291,12 +320,32 @@ class Cloaker:
         away = 1 - cosines
         if p.laggard > 0:
             weights = torch.softmax(away.detach() / p.laggard, dim=1)
-            loss = (weights * away).sum(dim=1)
         else:
-            loss = away.mean(dim=1)
+            weights = torch.full_like(away, 1.0 / away.shape[1])
+        terms = weights * away
         if self_vecs is not None and p.self_weight > 0:
-            loss = loss + p.self_weight * F.relu(torch.stack(self_cos, dim=1)).mean(dim=1)
-        return loss, cosines
+            terms = terms + p.self_weight * F.relu(torch.stack(self_cos, dim=1)) / away.shape[1]
+        return terms, cosines
+
+    @staticmethod
+    def _normalised_grad(terms, penalty, delta, act):
+        """Gradient of the loss with each surrogate's term rescaled to the mean per-face gradient norm.
+
+        The transformer switches (pna, tgr, sgm) shrink a surrogate's input gradient by one to two
+        orders of magnitude without changing its loss, so a summed gradient would silently drop
+        that surrogate from the update. Normalising per surrogate keeps every member's direction
+        at the same weight (as in gradient-normalised ensemble attacks) while leaving the DSSIM
+        penalty at its natural scale relative to the mean.
+        """
+        grads = []
+        for j in range(terms.shape[1]):
+            g, = torch.autograd.grad((terms[:, j] * act).sum(), delta, retain_graph=True)
+            grads.append(g)
+        g_pen, = torch.autograd.grad((penalty * act).sum(), delta)
+        grads = torch.stack(grads)  # (n_models, N, 3, H, W)
+        norms = grads.flatten(2).norm(dim=2).clamp_min(1e-12)  # (n_models, N)
+        scale = norms.mean(dim=0, keepdim=True) / norms
+        return (grads * scale[:, :, None, None, None]).sum(dim=0) + g_pen
 
     def _cloak_batch(self, crops, targets, rng):
         p = self.params
@@ -328,21 +377,26 @@ class Cloaker:
         views = 1 + p.eot_samples
         for step in range(p.steps):
             clean_step = step % views == 0
-            x = (images + delta * mask).clamp(0, 255)
+            x = (images + self._perturbation(delta, mask)).clamp(0, 255)
+            self._set_token_mask(0.0 if clean_step else p.token_mask)
             if clean_step:
                 aligned = warp_to_template(x / 255.0, clean_m)
             else:
                 jitter = rng.uniform(-p.kps_jitter, p.kps_jitter, size=(n, 5, 2)).astype(np.float32)
                 m = np.stack([estimate_norm(c.kps + jitter[i]) for i, c in enumerate(crops)])
                 aligned = self._augment(warp_to_template(x / 255.0, m), rng)
-            feat_loss, cosines = self._feature_loss(aligned, target_vecs, self_vecs)
+            terms, cosines = self._per_model_loss(aligned, target_vecs, self_vecs)
+            feat_loss = terms.sum(dim=1)
             d = dssim(x, images, mask)
             penalty = p.dssim_weight * F.relu(d - p.dssim_budget)
-            loss = ((feat_loss + penalty) * active.float()).sum()
+            act = active.float()
 
             opt.zero_grad()
-            loss.backward()
-            delta.grad.mul_(active.float().view(-1, 1, 1, 1))
+            if p.grad_norm and terms.shape[1] > 1:
+                delta.grad = self._normalised_grad(terms, penalty, delta, act)
+            else:
+                ((feat_loss + penalty) * act).sum().backward()
+            delta.grad.mul_(act.view(-1, 1, 1, 1))
             if 0 < p.patchout < 1:
                 delta.grad.mul_(_block_dropout_mask(delta.grad, p.patchout, rng))
             opt.step()
@@ -371,10 +425,11 @@ class Cloaker:
             if not active.any():
                 break
 
+        self._set_token_mask(0.0)
         never = torch.isinf(best_loss)
         if never.any():
             # no step landed inside the budget: return the last perturbation
-            best_delta[never] = (delta.detach() * mask)[never]
+            best_delta[never] = self._perturbation(delta.detach(), mask)[never]
             with torch.no_grad():
                 x = (images + best_delta).clamp(0, 255)
                 _, cosines = self._feature_loss(warp_to_template(x / 255.0, clean_m), target_vecs)

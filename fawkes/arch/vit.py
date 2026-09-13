@@ -22,9 +22,17 @@
 # - ``mask_token`` is only created when ``mask_ratio > 0`` (as in the CVLface variant, whose
 #   checkpoints have no mask_token; the LVFace checkpoints, trained with mask_ratio 0.05, do);
 # - gradient checkpointing removed (training only);
-# - ``Attention.pna``: when True the attention map is detached, so gradients w.r.t. the input
-#   flow only through the value path ("Pay No Attention", Wei et al., AAAI 2022). Forward values
-#   are unchanged; only used when the network is a cloaking surrogate.
+# - cloaking-surrogate switches, all off by default and all leaving forward values unchanged
+#   unless stated (set by fawkes.cloak.Cloaker from CloakParams):
+#   * ``Attention.pna``: detach the attention map so input gradients flow only through the value
+#     path ("Pay No Attention", Wei et al., AAAI 2022);
+#   * ``Attention.tgr`` / ``Mlp.tgr``: token gradient regularisation (Zhang et al., CVPR 2023):
+#     in the backward pass zero the gradient of the token with the largest and the smallest
+#     gradient per channel and scale the rest by ``tgr`` (attention map, qkv and MLP outputs);
+#   * ``Block.sgm``: multiply the gradient through both residual branches by ``sgm`` (skip
+#     gradient method generalised to ViTs, Wang et al., 2024);
+#   * ``VisionTransformer.adv_mask_ratio``: drop this fraction of tokens at random in eval mode
+#     and fill them with ``mask_token`` (token-level PatchOut; changes the forward output).
 # The parameter names and shapes are unchanged, so upstream checkpoints load with strict=True.
 import collections.abc
 from itertools import repeat
@@ -60,6 +68,40 @@ class DropPath(nn.Module):
         return x * random_tensor / keep_prob
 
 
+class _ScaleGrad(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, gamma):
+        ctx.gamma = gamma
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, g):
+        return g * ctx.gamma, None
+
+
+class _TokenGradReg(torch.autograd.Function):
+    """Identity forward; backward zeroes the extreme-token gradients per channel and scales the rest.
+
+    `x` is (..., N, C) with N the token axis (for an attention map (B, H, N, N) the last axis is
+    the key index and the token axis the query index). Per channel the token with the largest
+    and the token with the smallest gradient get zero gradient, all others are scaled by gamma.
+    """
+
+    @staticmethod
+    def forward(ctx, x, gamma):
+        ctx.gamma = gamma
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, g):
+        top = g.argmax(dim=-2, keepdim=True)
+        bot = g.argmin(dim=-2, keepdim=True)
+        out = g * ctx.gamma
+        out = out.scatter(-2, top, 0.0)
+        out = out.scatter(-2, bot, 0.0)
+        return out, None
+
+
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.ReLU6, drop=0.):
         super().__init__()
@@ -69,6 +111,7 @@ class Mlp(nn.Module):
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
         self.drop = nn.Dropout(drop)
+        self.tgr = 0.0
 
     def forward(self, x):
         x = self.fc1(x)
@@ -76,6 +119,8 @@ class Mlp(nn.Module):
         x = self.drop(x)
         x = self.fc2(x)
         x = self.drop(x)
+        if self.tgr > 0:
+            x = _TokenGradReg.apply(x, self.tgr)
         return x
 
 
@@ -108,11 +153,15 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
         self.pna = False
+        self.tgr = 0.0
 
     def forward(self, x):
         batch_size, num_token, embed_dim = x.shape
         #qkv is [3,batch_size,num_heads,num_token, embed_dim//num_heads]
-        qkv = self.qkv(x).reshape(
+        qkv = self.qkv(x)
+        if self.tgr > 0:
+            qkv = _TokenGradReg.apply(qkv, min(1.0, 3 * self.tgr))  # TGR scales the qkv gradient less
+        qkv = qkv.reshape(
             batch_size, num_token, 3, self.num_heads, embed_dim // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0].float(), qkv[1].float(), qkv[2].float()
         attn = (q @ k.transpose(-2, -1)) * self.scale
@@ -120,6 +169,8 @@ class Attention(nn.Module):
         attn = self.attn_drop(attn)
         if self.pna:
             attn = attn.detach()
+        elif self.tgr > 0:
+            attn = _TokenGradReg.apply(attn, self.tgr)
         x = (attn @ v).transpose(1, 2).reshape(batch_size, num_token, embed_dim)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -159,10 +210,13 @@ class Block(nn.Module):
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim,
                        act_layer=act_layer, drop=drop)
         self.extra_gflops = (num_heads * patch_n * (dim//num_heads)*patch_n * 2) / (1000**3)
+        self.sgm = 1.0
 
     def forward(self, x):
-        x = x + self.drop_path(self.attn(self.norm1(x)))
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        a = self.drop_path(self.attn(self.norm1(x)))
+        x = x + (_ScaleGrad.apply(a, self.sgm) if self.sgm != 1.0 else a)
+        m = self.drop_path(self.mlp(self.norm2(x)))
+        x = x + (_ScaleGrad.apply(m, self.sgm) if self.sgm != 1.0 else m)
         return x
 
 
@@ -220,6 +274,7 @@ class VisionTransformer(nn.Module):
         else:
             self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, in_channels=in_channels, embed_dim=embed_dim)
         self.mask_ratio = mask_ratio
+        self.adv_mask_ratio = 0.0  # cloaking: token dropout in eval mode (see header)
         self.using_checkpoint = using_checkpoint
         num_patches = self.patch_embed.num_patches
         self.num_patches = num_patches
@@ -312,15 +367,17 @@ class VisionTransformer(nn.Module):
         x = x + self.pos_embed
         x = self.pos_drop(x)
 
-        if self.training and self.mask_ratio > 0:
-            x, _, ids_restore = self.random_masking(x)
+        masking = (self.training and self.mask_ratio > 0) or (not self.training and self.adv_mask_ratio > 0)
+        if masking:
+            x, _, ids_restore = self.random_masking(x, self.mask_ratio if self.training else self.adv_mask_ratio)
 
         for func in self.blocks:
             x = func(x)
         x = self.norm(x.float())
 
-        if self.training and self.mask_ratio > 0:
-            mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] - x.shape[1], 1)
+        if masking:
+            token = self.mask_token if self.mask_ratio > 0 else x.new_zeros(1, 1, x.shape[2])
+            mask_tokens = token.repeat(x.shape[0], ids_restore.shape[1] - x.shape[1], 1)
             x_ = torch.cat([x[:, :, :], mask_tokens], dim=1)  # no cls token
             x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
             x = x_
