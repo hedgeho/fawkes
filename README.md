@@ -124,7 +124,10 @@ ensemble gained two more transformers (`mid` and `high`), for two thirds of them
 transformer evaluator; a fourth evaluator, LVFace-T, is a transformer from the same family as
 three of the surrogates and is a weaker test.
 Under 1:1 verification with the usual 0.3 cosine threshold, every cloaked photo in `mid` and
-`high` fails to match its own identity on all three evaluators. Each number is 50 test photos, so
+`high` fails to match its own identity on all three evaluators. The table is for an adversary that
+trains on the cloaked photos and meets clean ones; with the sides swapped (`--clean-gallery`: the
+adversary already holds clean photos and meets a cloaked one), the same cloaks give 0.80 / 0.91 /
+0.55 / 0.97 in `mid` and 0.89 / 0.93 / 0.71 / 1.00 in `high`. Each number is 50 test photos, so
 differences below about 0.06 are noise. Every configuration tried on the way to these settings is
 in [eval/RESULTS.md](eval/RESULTS.md); the reasoning is in [docs/DECISIONS.md](docs/DECISIONS.md). See [eval/README.md](eval/README.md) for the metrics and
 how to run it.

@@ -12,6 +12,8 @@ def row(path):
     label = a.get("tag") or "-"
     if a.get("jpeg"):
         label += f" jpeg{a['jpeg']}"
+    if a.get("clean_gallery"):
+        label += " clean-gallery"
     overrides = " ".join(a.get("cloak_arg") or []) or "-"
     prot = " | ".join(f"{ev[k]['protection_rate']:.2f}" for k in ev)
     spp = q.get("seconds_per_photo")

@@ -8,6 +8,8 @@ Protocol (see eval/README.md):
   4. for each evaluator (the adversary's own detect + align + embed pipeline) embed everything,
      train a logistic-regression probe on the train embeddings (cloaked for protected identities)
      and measure how often it still recognises the clean test photos of the protected identities.
+     With --clean-gallery the roles are swapped: the probe is trained on the clean test photos and
+     asked to recognise the cloaked train photos (an adversary that already holds clean photos).
 
 Run:  uv run python eval/harness.py --cloaker legacy --mode mid [--jpeg 75] [--smoke]
 """
@@ -398,31 +400,43 @@ def image_quality(pairs):
 
 # --------------------------------------------------------------------------- evaluation
 
-def evaluate(evaluator, cache, split, workdir, cloaked_files):
-    """Embed everything with one evaluator and compute the probe + verification metrics."""
-    prot_names = {i.name for i in split.protected}
-    train_rows, test_rows = [], []          # (identity, path)
+def probe_rows(split, workdir, cloaked_files, clean_gallery=False):
+    """(identity, path) rows for the linear probe: the gallery it is trained on and the probes it
+    must recognise. Default: gallery = train photos (cloaked for protected identities), probes =
+    clean test photos. --clean-gallery: gallery = clean test photos, probes = train photos (cloaked
+    for protected identities), i.e. the adversary enrolled the person before the cloaks existed."""
+    train_rows, test_rows = [], []
     for ident in split.protected + split.clean:
         for n in range(len(ident.train)):
             p = photo_path(workdir, ident, "train", n)
             train_rows.append((ident.name, cloaked_files.get(p, p)))
         for n in range(len(ident.test)):
             test_rows.append((ident.name, photo_path(workdir, ident, "test", n)))
-    clean_train_rows = [(i.name, photo_path(workdir, i, "train", n)) for i in split.protected for n in range(len(i.train))]
+    return (test_rows, train_rows) if clean_gallery else (train_rows, test_rows)
 
-    paths = sorted({p for _, p in train_rows + test_rows + clean_train_rows})
+
+def evaluate(evaluator, cache, split, workdir, cloaked_files, clean_gallery=False):
+    """Embed everything with one evaluator and compute the probe + verification metrics."""
+    prot_names = {i.name for i in split.protected}
+    gallery_rows, probe_list = probe_rows(split, workdir, cloaked_files, clean_gallery)
+    clean_train_rows = [(i.name, photo_path(workdir, i, "train", n)) for i in split.protected for n in range(len(i.train))]
+    cloaked_rows = [(i, cloaked_files.get(p, p)) for i, p in clean_train_rows]
+    clean_test_rows = [(i.name, photo_path(workdir, i, "test", n)) for i in split.protected for n in range(len(i.test))]
+
+    paths = sorted({p for _, p in gallery_rows + probe_list + clean_train_rows + cloaked_rows + clean_test_rows})
     emb = cache.embed_files(evaluator, paths)
     undetected = sorted(p for p in paths if emb[p] is None)
     keep = lambda rows: [(i, emb[p]) for i, p in rows if emb[p] is not None]
-    train, test, clean_train = keep(train_rows), keep(test_rows), keep(clean_train_rows)
+    gallery, probes = keep(gallery_rows), keep(probe_list)
 
-    metrics = probe_metrics(np.stack([e for _, e in train]), [i for i, _ in train],
-                            np.stack([e for _, e in test]), [i for i, _ in test], prot_names)
+    metrics = probe_metrics(np.stack([e for _, e in gallery]), [i for i, _ in gallery],
+                            np.stack([e for _, e in probes]), [i for i, _ in probes], prot_names)
+    metrics["gallery"] = "clean test photos" if clean_gallery else "cloaked train photos"
+    # 1:1 verification is always cloaked train photo against the clean test centroid of the same identity
     test_by_id = {}
-    for i, e in test:
-        if i in prot_names:
-            test_by_id.setdefault(i, []).append(e)
-    metrics.update(verification_metrics([(i, e) for i, e in train if i in prot_names], clean_train, test_by_id))
+    for i, e in keep(clean_test_rows):
+        test_by_id.setdefault(i, []).append(e)
+    metrics.update(verification_metrics(keep(cloaked_rows), keep(clean_train_rows), test_by_id))
     metrics["n_undetected"] = len(undetected)
     metrics["undetected"] = [os.path.relpath(p, workdir) for p in undetected]
     return metrics
@@ -459,6 +473,9 @@ def parse_args(argv=None):
                     help="all protected identities mimic one target (default: one target per identity)")
     ap.add_argument("--tag", default=None, help="extra label for the results file and report header")
     ap.add_argument("--jpeg", type=int, default=None, metavar="Q", help="re-encode cloaked photos as JPEG quality Q")
+    ap.add_argument("--clean-gallery", action="store_true",
+                    help="train the probe on the clean test photos and recognise the cloaked train photos "
+                         "(the adversary enrolled the person from clean photos before the cloaks existed)")
     ap.add_argument("--evaluator", action="append", default=None,
                     help="evaluator key; repeatable. Built in: " + ", ".join(BUILTIN_EVALUATORS) +
                          "; anything else is resolved with fawkes.models.load_evaluator")
@@ -516,17 +533,20 @@ def main(argv=None):
     results = {"args": vars(args), "split": asdict(split), "quality": quality, "evaluators": {}}
     for key in args.evaluator:
         print(f"evaluating with {key} ...")
-        results["evaluators"][key] = evaluate(make_evaluator(key), cache, split, workdir, cloaked_files)
+        results["evaluators"][key] = evaluate(make_evaluator(key), cache, split, workdir, cloaked_files,
+                                              clean_gallery=args.clean_gallery)
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
     tag = (f"{time.strftime('%Y%m%d-%H%M%S')}_{args.cloaker}_{args.mode}" + (f"_{args.tag}" if args.tag else "")
-           + (f"_jpeg{args.jpeg}" if args.jpeg else "") + ("_smoke" if args.smoke else ""))
+           + (f"_jpeg{args.jpeg}" if args.jpeg else "") + ("_cleangallery" if args.clean_gallery else "")
+           + ("_smoke" if args.smoke else ""))
     out = os.path.join(RESULTS_DIR, tag + ".json")
     with open(out, "w") as f:
         json.dump(results, f, indent=1, default=str)
     report = markdown_report(results)
     print(f"\n### {args.cloaker} / {args.mode}" + (f" / {args.tag}" if args.tag else "")
-          + (f" / jpeg {args.jpeg}" if args.jpeg else "") + "\n\n" + report)
+          + (f" / jpeg {args.jpeg}" if args.jpeg else "") + (" / clean gallery" if args.clean_gallery else "")
+          + "\n\n" + report)
     print(f"\nwritten {os.path.relpath(out, ROOT)}")
     return results
 

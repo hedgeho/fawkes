@@ -81,6 +81,22 @@ def test_verification_metrics():
     assert m["frac_clean_below_threshold"] == pytest.approx(0.0)
 
 
+def test_probe_rows_swap_gallery_and_probes():
+    split = harness.select_identities(fake_counts(), seed=0, n_protected=2, n_clean=1, train_per_id=3, test_per_id=2)
+    work = "/w"
+    to_cloak = [harness.photo_path(work, i, "train", n) for i in split.protected for n in range(3)]
+    cloaked = {p: harness.cloaked_path(p) for p in to_cloak}
+    gallery, probes = harness.probe_rows(split, work, cloaked)
+    gallery_c, probes_c = harness.probe_rows(split, work, cloaked, clean_gallery=True)
+    assert (gallery_c, probes_c) == (probes, gallery)
+    # default: the gallery holds the cloaks, the probes are clean; clean identities are clean on both sides
+    assert sorted(p for _, p in gallery if harness.CLOAKED_SUFFIX in p) == sorted(cloaked.values())
+    assert not any(harness.CLOAKED_SUFFIX in p for _, p in probes)
+    assert len(gallery) == 3 * 3 and len(probes) == 3 * 2
+    clean_name = split.clean[0].name
+    assert all(harness.CLOAKED_SUFFIX not in p for i, p in gallery if i == clean_name)
+
+
 def test_jpeg_reencode_changes_bytes(tmp_path):
     rng = np.random.default_rng(0)
     png = tmp_path / "3.png"

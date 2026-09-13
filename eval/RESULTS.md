@@ -130,6 +130,27 @@ every evaluator, the mid run repeats Z19 within 0.02.
 | high | 0.86 | 0.92 | 0.70 | 0.96 | 0.016 | 4.4 |
 | high, JPEG 75 | 0.86 | 0.90 | 0.68 | 0.96 | | |
 
+## Clean gallery (2026-09-13, `--clean-gallery`, same cloaks as the final modes above)
+
+The other threat model: the adversary enrolled the person from clean photos before any cloak
+existed and meets a cloaked photo later. Same cloaks, probe trained on the 5 clean test photos per
+identity, asked to recognise the 100 cloaked train photos. Evaluated on a CPU from the cluster's
+cloaks and embedding caches. The 1:1 columns (every cloaked photo below the 0.3 threshold on every
+evaluator) are unchanged by construction.
+
+| mode | buffalo_l | antelopev2 | adaface_vit_b | lvface_t |
+|---|---|---|---|---|
+| mid | 0.80 | 0.91 | 0.55 | 0.97 |
+| mid, JPEG 75 | 0.74 | 0.90 | 0.52 | 0.96 |
+| high | 0.89 | 0.93 | 0.71 | 1.00 |
+| high, JPEG 75 | 0.88 | 0.89 | 0.71 | 0.99 |
+
+Within noise of the cloaked-gallery numbers on every evaluator (each cell is 100 photos here, 50
+there): the cloaks move the embedding far enough that it does not matter which side of the
+classifier they land on. Mid on the transformer evaluator is the one cell where the clean gallery
+is clearly easier to beat (0.55 against 0.48), which is expected, since a probe fitted on cloaked
+photos has partly learned the cloak direction.
+
 ## Final modes of 2026-09-12 (`hpc/harness.sh`, three surrogates)
 
 | mode | buffalo_l | antelopev2 | adaface_vit_b | DSSIM face | s/photo A100 |

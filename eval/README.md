@@ -13,6 +13,7 @@ uv run python eval/harness.py --cloaker legacy --mode mid              # full ba
 uv run python eval/harness.py --cloaker legacy --mode mid --jpeg 75    # same, cloaks re-encoded as JPEG
 uv run python eval/harness.py --cloaker v2 --mode mid --batch-size 16 # torch pipeline, one target per identity
 uv run python eval/harness.py --cloaker v2 --mode mid --cloak-arg steps=120 --cloak-arg self_weight=1 --tag long
+uv run python eval/harness.py --cloaker v2 --mode mid --skip-cloak --clean-gallery  # same cloaks, adversary enrolled from clean photos
 ```
 
 Flags:
@@ -26,6 +27,7 @@ Flags:
 | `--shared-target` | off | all protected identities mimic the same target (default: a different target per identity, as with independent users) |
 | `--tag` | none | label added to the results file name and the report header |
 | `--jpeg Q` | off | re-encode every cloaked photo as JPEG quality Q before the adversary sees it (a social-network upload) |
+| `--clean-gallery` | off | swap the probe's sides: train it on the clean test photos and ask it to recognise the cloaked train photos (see below) |
 | `--evaluator KEY` | `buffalo_l`, `antelopev2` | repeatable; built-in keys are insightface packs, any other key (`adaface_vit_b`, `lvface_t`) goes through `fawkes.models.load_evaluator` |
 | `--seed` | 0 | selects identities and the train/test split; everything is deterministic given the seed |
 | `--n-protected`, `--n-clean` | 10, 10 | identities that get cloaked / stay clean |
@@ -38,7 +40,7 @@ The first run downloads LFW (about 230 MB, cached by scikit-learn in `~/scikit_l
 insightface packs (`~/.insightface/models`). insightface extracts `antelopev2.zip` into a nested
 `antelopev2/antelopev2/` folder and then fails to find it; move the `.onnx` files one level up.
 
-Results go to `eval/results/<timestamp>_<cloaker>_<mode>[_tag][_jpegQ][_smoke].json` together with
+Results go to `eval/results/<timestamp>_<cloaker>_<mode>[_tag][_jpegQ][_cleangallery][_smoke].json` together with
 all arguments and the identity split, and a markdown table is printed. `hpc/sweep.sh` runs a list of
 configurations on a Slurm GPU node.
 
@@ -68,6 +70,16 @@ asked to recognise the *clean test photos of the protected identities*. This is 
 adversary does: scrape the (cloaked) photos, embed them with an off-the-shelf model, fit a
 classifier, and run it on new (uncloaked) sightings. 0 = the cloak did nothing, 1 = the adversary
 never recognises a protected person. With `--cloaker none` it must be about 0.
+
+**clean gallery** (`--clean-gallery`): the other threat model. The adversary already holds clean
+photos of the person (scraped before they started cloaking, or from another source), fits the
+classifier on those, and meets a cloaked photo later. The harness reuses the same cloaks and swaps
+the probe's sides: it is trained on the *clean test photos* (5 per identity, the enrolment) and asked
+to recognise the *cloaked train photos* (10 per identity). The protection rate is then the fraction
+of cloaked photos the classifier gets wrong. Nothing is re-cloaked, so this runs from an existing
+workdir with `--skip-cloak`, and the 1:1 verification columns are unchanged, since they already
+compare cloaked photos with a clean gallery. The two protection rates are not directly comparable:
+the gallery has 5 rather than 10 photos per identity and the probe set is 100 rather than 50 photos.
 
 **clean-id acc** = the same probe's accuracy on the clean identities' test photos. It should stay
 near 1; if it drops, the probe or the data is broken, not the cloak.
