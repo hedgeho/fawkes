@@ -74,6 +74,12 @@ CONFIGS=(
   "Z14|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg grad_norm=1 --cloak-arg delta_sigma=1.0|"
   "Z15|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg grad_norm=1 --cloak-arg pna=1 --cloak-arg tgr=0.25 --cloak-arg sgm=0.6 --cloak-arg token_mask=0.3|"
   "Z16|high|--cloak-arg grad_norm=1 --cloak-arg pna=1 --cloak-arg tgr=0.25|"
+  # Round 7: the round-5 winner (five surrogates, PNA) plus token masking, with and without gradient
+  # normalisation; the same recipe as a mid-mode candidate.
+  "Z17|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l,lvface_s --cloak-arg pna=1 --cloak-arg token_mask=0.3|jpeg"
+  "Z18|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l,lvface_s --cloak-arg pna=1 --cloak-arg token_mask=0.3 --cloak-arg grad_norm=1|"
+  "Z19|mid|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l,lvface_s --cloak-arg pna=1 --cloak-arg token_mask=0.3|jpeg"
+  "Z20|mid|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg pna=1 --cloak-arg token_mask=0.3|"
 )
 want=("$@")
 for cfg in "${CONFIGS[@]}"; do
