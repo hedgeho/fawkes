@@ -20,6 +20,9 @@ key             upstream                         order   normalisation
 arcface_r100    insightface arcface_torch        RGB     (x/255 - 0.5) / 0.5
 adaface_ir101   CVLface (mk-minchul)             RGB     (x/255 - 0.5) / 0.5
 lvface_b        bytedance/LVFace                 RGB     (x/255 - 0.5) / 0.5
+lvface_l        bytedance/LVFace                 RGB     (x/255 - 0.5) / 0.5
+lvface_s        bytedance/LVFace                 RGB     (x/255 - 0.5) / 0.5
+lvface_t        bytedance/LVFace (evaluator)     RGB     (x/255 - 0.5) / 0.5
 w600k_r50       insightface buffalo_l (ONNX)     RGB     (x - 127.5) / 127.5
 glintr100       insightface antelopev2 (ONNX)    RGB     (x - 127.5) / 127.5
 adaface_vit_b   CVLface (mk-minchul)             RGB     (x/255 - 0.5) / 0.5
@@ -108,6 +111,25 @@ SURROGATES: dict[str, ModelSpec] = {
         licence="LVFace code MIT; weights 'non-commercial research purposes only' (LICENSE_CODE.txt / README)",
         note="LVFace-B (ViT-B, patch 9, Glint360K), arcface_torch network name 'vit_b_dp005_mask_005'.",
     ),
+    "lvface_l": ModelSpec(
+        key="lvface_l",
+        repo_id="bytedance-research/LVFace",
+        filename="LVFace-L_Glint360K/LVFace-L_Glint360K.pt",
+        sha256="00bb4e6a5314065b736ebb4f82293064d3dbcc4253f178a54c2b09b9c1ec6905",
+        kind="torch", arch="vit_l_p9", embed_dim=512,
+        licence="LVFace code MIT; weights 'non-commercial research purposes only' (LICENSE_CODE.txt / README)",
+        note=("LVFace-L (ViT-L: width 768, depth 24, patch 9, Glint360K), arcface_torch network name "
+              "'vit_l_dp005_mask_005'. Second transformer surrogate, added 2026-09-13 (decision 11)."),
+    ),
+    "lvface_s": ModelSpec(
+        key="lvface_s",
+        repo_id="bytedance-research/LVFace",
+        filename="LVFace-S_Glint360K/LVFace-S_Glint360K.pt",
+        sha256="6c62c43bde1ac646a90134105c562607ac8d6ab57e00414f5a5defa1558310a8",
+        kind="torch", arch="vit_s_p9", embed_dim=512,
+        licence="LVFace code MIT; weights 'non-commercial research purposes only' (LICENSE_CODE.txt / README)",
+        note="LVFace-S (ViT-S: width 512, depth 12, patch 9, Glint360K), arcface_torch network name 'vit_s'.",
+    ),
 }
 
 EVALUATORS: dict[str, ModelSpec] = {
@@ -140,6 +162,19 @@ EVALUATORS: dict[str, ModelSpec] = {
         kind="torch", arch="vit_b_p8", embed_dim=512,
         licence=_CVLFACE_LICENCE,
         note="AdaFace ViT-B (patch 8) trained on WebFace4M (CVLface release, plain ViT, not the KP-RPE variant).",
+    ),
+    "lvface_t": ModelSpec(
+        key="lvface_t",
+        repo_id="bytedance-research/LVFace",
+        filename="LVFace-T_Glint360K/LVFace-T_Glint360K.pt",
+        sha256="1f5b73d6f7a18e431d95d2ccabb4d00dca2a6f2004eb74de2c5788d386cb59ec",
+        kind="torch", arch="vit_t_p9", embed_dim=512,
+        licence="LVFace code MIT; weights 'non-commercial research purposes only' (LICENSE_CODE.txt / README)",
+        note=("LVFace-T (ViT-T: width 256, depth 12, patch 9, Glint360K), arcface_torch network name 'vit_t'. "
+              "Second transformer evaluator. Caveat: same family and training set as the lvface_b/lvface_l "
+              "surrogates, so it is a weaker held-out test than adaface_vit_b (different code base, patch "
+              "size, loss and data); it is included to check that the transformer gains are not specific "
+              "to one evaluator."),
     ),
 }
 
@@ -256,6 +291,15 @@ def _build_vit_b_p9(path: Path) -> nn.Module:
     return net
 
 
+def _build_lvface_vit(path: Path, embed_dim: int, depth: int, mask_ratio: float) -> nn.Module:
+    # arcface_torch / LVFace network names vit_t, vit_s, vit_l_dp005_mask_005 (patch 9, 8 heads, mlp 4)
+    from .arch.vit import VisionTransformer
+    net = VisionTransformer(img_size=INPUT_SIZE, patch_size=9, num_classes=512, embed_dim=embed_dim, depth=depth,
+                            num_heads=8, drop_path_rate=0.05, norm_layer="ln", mask_ratio=mask_ratio)
+    net.load_state_dict(_load_state(path), strict=True)
+    return net
+
+
 def _build_vit_b_p8(path: Path) -> nn.Module:
     # CVLface models/vit config name "base"
     from .arch.vit import VisionTransformer
@@ -269,6 +313,9 @@ _ARCHS: dict[str, Callable[[Path], nn.Module]] = {
     "iresnet100": _build_iresnet100,
     "adaface_ir101": _build_adaface_ir101,
     "vit_b_p9": _build_vit_b_p9,
+    "vit_l_p9": lambda path: _build_lvface_vit(path, embed_dim=768, depth=24, mask_ratio=0.05),
+    "vit_s_p9": lambda path: _build_lvface_vit(path, embed_dim=512, depth=12, mask_ratio=0.1),
+    "vit_t_p9": lambda path: _build_lvface_vit(path, embed_dim=256, depth=12, mask_ratio=0.1),
     "vit_b_p8": _build_vit_b_p8,
 }
 

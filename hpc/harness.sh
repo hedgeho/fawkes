@@ -16,7 +16,7 @@ export HF_HUB_OFFLINE=1
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
 mode="${1:?mode}"; shift
 work="eval/work/${mode}"
-ev=(--evaluator buffalo_l --evaluator antelopev2 --evaluator adaface_vit_b)
+ev=(--evaluator buffalo_l --evaluator antelopev2 --evaluator adaface_vit_b --evaluator lvface_t)
 echo "=== v2 ${mode} $(date)"
 uv run python eval/harness.py --cloaker v2 --mode "${mode}" --batch-size 16 --workdir "${work}" "${ev[@]}" "$@"
 echo "=== v2 ${mode} jpeg75 $(date)"

@@ -21,7 +21,10 @@
 # - the ``torch.cuda.amp.autocast`` blocks in Attention/Block removed (CPU-only inference);
 # - ``mask_token`` is only created when ``mask_ratio > 0`` (as in the CVLface variant, whose
 #   checkpoints have no mask_token; the LVFace checkpoints, trained with mask_ratio 0.05, do);
-# - gradient checkpointing removed (training only).
+# - gradient checkpointing removed (training only);
+# - ``Attention.pna``: when True the attention map is detached, so gradients w.r.t. the input
+#   flow only through the value path ("Pay No Attention", Wei et al., AAAI 2022). Forward values
+#   are unchanged; only used when the network is a cloaking surrogate.
 # The parameter names and shapes are unchanged, so upstream checkpoints load with strict=True.
 import collections.abc
 from itertools import repeat
@@ -104,6 +107,7 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
+        self.pna = False
 
     def forward(self, x):
         batch_size, num_token, embed_dim = x.shape
@@ -114,6 +118,8 @@ class Attention(nn.Module):
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
+        if self.pna:
+            attn = attn.detach()
         x = (attn @ v).transpose(1, 2).reshape(batch_size, num_token, embed_dim)
         x = self.proj(x)
         x = self.proj_drop(x)

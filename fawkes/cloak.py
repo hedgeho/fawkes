@@ -30,6 +30,8 @@ class CloakParams:
     self_weight: float = 0.0  # penalty on the cosine to the face's own clean embedding (residual identity)
     laggard: float = 0.0  # >0: weight surrogates by softmax((1 - cos) / laggard) so the worst one leads
     stop_cos: float = 0.75  # stop a face once every surrogate is this close to the target
+    pna: bool = False  # transformer surrogates: detach the attention maps in the backward pass (PNA)
+    patchout: float = 0.0  # >0: each step keeps this fraction of 8x8 gradient blocks (PatchOut-style dropout)
     patience: int = 10  # stop a face when its clean loss has not improved for this many clean steps
     seed: int = 0
     batch_size: int = 8
@@ -178,6 +180,20 @@ def jpeg_approx(x, quality):
     return out.clamp(0, 1)
 
 
+def _block_dropout_mask(grad, keep, rng, block=8):
+    """(N,1,H,W) mask keeping each `block`x`block` cell of the gradient with probability `keep`.
+
+    PatchOut (Wei et al., AAAI 2022) updates only a random subset of the image patches per step so
+    the perturbation does not over-fit the surrogate's attention to a few tokens. The perturbation
+    lives in crop coordinates here, so the cells are a fixed pixel grid rather than the surrogates'
+    token grid; the mask is not renormalised (Adam is scale invariant per coordinate).
+    """
+    n, _, h, w = grad.shape
+    hb, wb = -(-h // block), -(-w // block)
+    cells = torch.from_numpy((rng.uniform(size=(n, 1, hb, wb)) < keep).astype(np.float32)).to(grad.device)
+    return cells.repeat_interleave(block, 2).repeat_interleave(block, 3)[:, :, :h, :w]
+
+
 # ----------------------------------------------------------------------------- the cloaker
 
 def _stack_crops(crops):
@@ -204,6 +220,10 @@ class Cloaker:
         self.verbose = verbose
         devices = {next(m.parameters()).device for m in self.surrogates.values() if any(True for _ in m.parameters())}
         self.device = devices.pop() if devices else torch.device("cpu")
+        for model in self.surrogates.values():
+            for m in model.modules():
+                if hasattr(m, "pna"):
+                    m.pna = bool(self.params.pna)
 
     @property
     def keys(self):
@@ -323,6 +343,8 @@ class Cloaker:
             opt.zero_grad()
             loss.backward()
             delta.grad.mul_(active.float().view(-1, 1, 1, 1))
+            if 0 < p.patchout < 1:
+                delta.grad.mul_(_block_dropout_mask(delta.grad, p.patchout, rng))
             opt.step()
             with torch.no_grad():
                 delta.clamp_(-p.eps, p.eps)
