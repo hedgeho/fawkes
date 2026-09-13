@@ -47,8 +47,8 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
   | mode | surrogates | steps | max pixel change | DSSIM budget | robustness views | s / face, 8-core CPU |
   |---|---|---|---|---|---|---|
   | low | AdaFace IR-101, ArcFace IR-100 | 60 | 16 | 0.012 | blur, resize, JPEG | 35 |
-  | mid | + LVFace-B | 60 | 16 | 0.012 | blur, resize, JPEG | 56 |
-  | high | same three | 200 | 16 | 0.017 | blur, resize, JPEG | about 190 |
+  | mid | + LVFace-B, LVFace-L, LVFace-S (transformers) | 60 | 16 | 0.012 | blur, resize, JPEG | 74 |
+  | high | same five | 200 | 16 | 0.017 | blur, resize, JPEG | about 250 (estimated) |
 
   Every mode also penalises what is left of your own identity in the cloaked face
   (`--self-weight`, see [docs/DECISIONS.md](docs/DECISIONS.md#10-penalise-the-residual-similarity-to-the-own-face-not-only-the-distance-to-the-target)).
@@ -104,21 +104,25 @@ identities, 10 training and 5 test photos each. The evaluators are the InsightFa
 deployments use (`buffalo_l`, a ResNet-50; `antelopev2`, a ResNet-100) and a vision transformer
 (AdaFace ViT-B, WebFace4M); none of them is in the surrogate ensemble.
 
-| cloaker | buffalo_l | antelopev2 | AdaFace ViT-B | DSSIM face box | s / photo |
-|---|---|---|---|---|---|
-| none | 0.00 | 0.00 | 0.00 | 0 | - |
-| Fawkes 1.0 (TensorFlow), mid | 0.00 | 0.00 | - | 0.015 | 15 (CPU) |
-| Fawkes 1.0, mid, JPEG 75 | 0.00 | 0.00 | - | 0.015 | - |
-| Fawkes 2, low | 0.74 | 0.90 | 0.20 | 0.012 | 35 (CPU), 1.1 (A100) |
-| Fawkes 2, low, JPEG 75 | 0.70 | 0.84 | 0.22 | 0.012 | - |
-| Fawkes 2, mid | 0.74 | 0.84 | 0.32 | 0.012 | 56 (CPU), 1.0 (A100) |
-| Fawkes 2, mid, JPEG 75 | 0.72 | 0.78 | 0.30 | 0.012 | - |
-| Fawkes 2, high | 0.80 | 0.90 | 0.58 | 0.017 | about 190 (CPU), 2.3 (A100) |
-| Fawkes 2, high, JPEG 75 | 0.78 | 0.90 | 0.56 | 0.017 | - |
+| cloaker | buffalo_l | antelopev2 | AdaFace ViT-B | LVFace-T | DSSIM face box | s / photo |
+|---|---|---|---|---|---|---|
+| none | 0.00 | 0.00 | 0.00 | 0.00 | 0 | - |
+| Fawkes 1.0 (TensorFlow), mid | 0.00 | 0.00 | - | - | 0.015 | 15 (CPU) |
+| Fawkes 1.0, mid, JPEG 75 | 0.00 | 0.00 | - | - | 0.015 | - |
+| Fawkes 2, low | 0.74 | 0.90 | 0.20 | - | 0.012 | 35 (CPU), 1.1 (A100) |
+| Fawkes 2, low, JPEG 75 | 0.70 | 0.84 | 0.22 | - | 0.012 | - |
+| Fawkes 2, mid (three surrogates, 2026-09-12) | 0.74 | 0.84 | 0.32 | - | 0.012 | 56 (CPU), 1.0 (A100) |
+| Fawkes 2, mid | 0.80 | 0.92 | 0.48 | 0.90 | 0.013 | 74 (CPU), 1.7 (A100) |
+| Fawkes 2, mid, JPEG 75 | 0.74 | 0.84 | 0.44 | 0.92 | 0.013 | - |
+| Fawkes 2, high (three surrogates, 2026-09-12) | 0.82 | 0.92 | 0.52 | 0.78 | 0.017 | about 190 (CPU), 2.8 (A100) |
+| Fawkes 2, high | 0.86 | 0.92 | 0.70 | 0.96 | 0.016 | about 250 (CPU, estimated), 4.4 (A100) |
+| Fawkes 2, high, JPEG 75 | 0.86 | 0.90 | 0.68 | 0.96 | 0.016 | - |
 
 The original cloaks move the embeddings a little but every protected identity is still recognised.
-Fawkes 2 defeats the classifier for most identities on the ResNet recognisers, less so on the
-transformer, whose features the ensemble (one transformer out of three surrogates) matches least.
+Fawkes 2 defeats the classifier for most identities on the ResNet recognisers and, since the
+ensemble gained two more transformers (`mid` and `high`), for two thirds of them on the
+transformer evaluator; a fourth evaluator, LVFace-T, is a transformer from the same family as
+three of the surrogates and is a weaker test.
 Under 1:1 verification with the usual 0.3 cosine threshold, every cloaked photo in `mid` and
 `high` fails to match its own identity on all three evaluators. Each number is 50 test photos, so
 differences below about 0.06 are noise. Every configuration tried on the way to these settings is

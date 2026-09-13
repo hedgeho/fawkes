@@ -62,7 +62,75 @@ What the sweep says:
 - The transformer evaluator never exceeds 0.6. The ensemble contains one transformer; a second
   one is the untested next lever.
 
-## Final modes (`hpc/harness.sh`)
+## Rounds 5 to 7 (2026-09-13): transformer transfer
+
+A fourth evaluator, LVFace-T (ViT-T, Glint360K), is added. It shares LVFace-B's family and
+training set, so it is a weaker held-out test than AdaFace ViT-B; it is there to check that gains
+on the transformer are not specific to one model. Cloaks computed on A100 or H100 nodes, so the
+seconds per photo are not comparable between rows. New `CloakParams` switches (all off by default):
+`pna` detaches the attention maps in the backward pass, `patchout` keeps a random fraction of 8 px
+gradient blocks, `tgr` zeroes the extreme-token gradients and scales the rest, `sgm` decays the
+residual-branch gradients, `token_mask` drops tokens through the ViT's own mask path on augmented
+steps, `delta_sigma` blurs the perturbation, `grad_norm` rescales each surrogate's gradient to
+the ensemble mean. `+L`, `+S` = LVFace-L, LVFace-S added to the three surrogates.
+
+| label | base | changes | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | DSSIM face |
+|---|---|---|---|---|---|---|---|
+| Z0 | high | (final high of 2026-09-12) | 0.82 | 0.92 | 0.52 | 0.78 | 0.017 |
+| Z1 | high | +L | 0.84 | 0.96 | 0.62 | 0.88 | 0.017 |
+| Z2 | high | pna | 0.84 | 0.94 | 0.56 | 0.76 | 0.017 |
+| Z3 | high | +L, pna | 0.88 | 0.98 | 0.66 | 0.86 | 0.017 |
+| Z4 | high | +L, pna, patchout 0.5 | 0.76 | 0.90 | 0.50 | 0.82 | 0.018 |
+| Z5 | high | patchout 0.5 | 0.76 | 0.82 | 0.40 | 0.66 | 0.018 |
+| Z6 | high | L instead of B | 0.86 | 0.86 | 0.48 | 0.76 | 0.017 |
+| Z7 | high | +L +S, pna | 0.92 | 0.96 | 0.66 | 0.92 | 0.017 |
+| Z8 | mid | +L, pna | 0.78 | 0.88 | 0.38 | 0.82 | 0.012 |
+| Z9 | high | +L, grad_norm | 0.82 | 0.90 | 0.58 | 0.84 | 0.017 |
+| Z10 | high | +L, grad_norm, pna | 0.86 | 0.94 | 0.60 | 0.86 | 0.017 |
+| Z11 | high | +L, grad_norm, pna, tgr 0.25 | 0.80 | 0.92 | 0.32 | 0.76 | 0.017 |
+| Z12 | high | +L, grad_norm, pna, sgm 0.6 | 0.84 | 0.92 | 0.62 | 0.90 | 0.016 |
+| Z13 | high | +L, grad_norm, pna, token_mask 0.3 | 0.88 | 0.96 | 0.66 | 0.88 | 0.017 |
+| Z14 | high | +L, grad_norm, delta_sigma 1.0 | 0.78 | 0.82 | 0.54 | 0.78 | 0.018 |
+| Z15 | high | +L, grad_norm, pna, tgr, sgm, token_mask | 0.76 | 0.90 | 0.18 | 0.58 | 0.017 |
+| Z16 | high | grad_norm, pna, tgr 0.25 | 0.84 | 0.98 | 0.46 | 0.72 | 0.017 |
+| Z17 | high | +L +S, pna, token_mask 0.3 | 0.90 | 0.96 | 0.66 | 0.94 | 0.017 |
+| Z17 jpeg | | JPEG 75 | 0.86 | 0.92 | 0.68 | 0.94 | |
+| Z18 | high | +L +S, pna, token_mask 0.3, grad_norm | 0.90 | 0.98 | 0.64 | 1.00 | 0.017 |
+| Z19 | mid | +L +S, pna, token_mask 0.3 | 0.82 | 0.92 | 0.50 | 0.90 | 0.013 |
+| Z19 jpeg | | JPEG 75 | 0.78 | 0.82 | 0.46 | 0.90 | |
+| Z20 | mid | +L, pna, token_mask 0.3 | 0.80 | 0.86 | 0.44 | 0.84 | 0.013 |
+
+What these rounds say:
+
+- A second transformer surrogate is the lever (Z0 to Z1: +0.10 on both transformer evaluators,
+  ResNets unchanged or up). Replacing LVFace-B by LVFace-L instead of adding it (Z6) gives
+  nothing, so it is the number of transformers in the ensemble, not their size. A third one
+  (LVFace-S, Z7) adds a little more on every evaluator.
+- PNA adds a few points on top of the extra surrogate (Z1 to Z3, Z10 to Z13 with token masking)
+  and nothing alone (Z2). Token masking through the ViT's own mask path is a small plus (Z10 to
+  Z13); the pixel-grid PatchOut is clearly harmful (Z4, Z5).
+- TGR is harmful in every combination (Z11, Z15, Z16): with 24 blocks the zeroed extreme-token
+  gradients remove most of the signal the targeted cosine loss needs. SGM is neutral (Z12). The
+  blurred perturbation loses on every evaluator at this DSSIM budget (Z14).
+- Per-surrogate gradient normalisation neither helps nor hurts with the switches that survive
+  (Z17 versus Z18) and costs 20 to 30 percent more, so it stays off. It was needed to test the
+  switches fairly: PNA, TGR and SGM shrink the transformer's input gradient 10 to 50 times.
+- The gains survive JPEG 75 (Z17, Z19).
+
+## Final modes of 2026-09-13 (`hpc/harness.sh`, five surrogates in mid and high)
+
+Same protocol; `low` is unchanged from 2026-09-12 (no transformer surrogate) and not re-run. The
+high run repeats configuration Z17 with a different GPU allocation; the two agree within 0.04 on
+every evaluator, the mid run repeats Z19 within 0.02.
+
+| mode | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | DSSIM face | s/photo A100 |
+|---|---|---|---|---|---|---|
+| mid | 0.80 | 0.92 | 0.48 | 0.90 | 0.013 | 1.7 |
+| mid, JPEG 75 | 0.74 | 0.84 | 0.44 | 0.92 | | |
+| high | 0.86 | 0.92 | 0.70 | 0.96 | 0.016 | 4.4 |
+| high, JPEG 75 | 0.86 | 0.90 | 0.68 | 0.96 | | |
+
+## Final modes of 2026-09-12 (`hpc/harness.sh`, three surrogates)
 
 | mode | buffalo_l | antelopev2 | adaface_vit_b | DSSIM face | s/photo A100 |
 |---|---|---|---|---|---|

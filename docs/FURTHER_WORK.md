@@ -4,8 +4,8 @@ Threat model: evade *existing, fixed* recognisers. The adversary scrapes cloaked
 them with an off-the-shelf model it did not train, and fits a linear or nearest-centroid
 classifier. Adaptive retraining against the cloak is out of scope (no cloak survives it, see
 `DECISIONS.md`, known limits). The weak spot measured by `eval/harness.py` is transfer to a
-held-out vision transformer (AdaFace ViT-B): 0.58 in `high` against 0.80 / 0.90 on the two
-IResNet evaluators before this round. This document lists what the literature says about that
+held-out vision transformer (AdaFace ViT-B): 0.52 to 0.58 in `high` against 0.80 / 0.90 on
+the two IResNet evaluators before this round, 0.66 after it. This document lists what the literature says about that
 gap and ranks the options for this pipeline. Written 2026-09-13 from three surveys (transfer to
 ViTs, open transformer recognisers, anti-facial-recognition cloaks); every claim carries its
 source. What was actually implemented and measured is in `DECISIONS.md` (decision 11) and
@@ -51,16 +51,16 @@ source. What was actually implemented and measured is in `DECISIONS.md` (decisio
 ## Ranked options for this pipeline
 
 Cost is engineering plus run time; gain is the reported number on ViT targets, ImageNet unless
-marked. Options 1 to 4 are implemented behind `CloakParams` switches (see decision 11 for what
-the harness said about them); the rest are not.
+marked. Options 1 to 5 are implemented behind `CloakParams` switches and were measured in sweep rounds
+5 to 7 (`eval/RESULTS.md`; decision 11 has the reasoning); the rest are not implemented.
 
 | # | option | mechanism | reported gain | cost | status |
 |---|---|---|---|---|---|
-| 1 | second transformer surrogate (LVFace-L) | architecture diversity in the ensemble | face-specific: surrogate diversity is the largest lever in DPA | +1 s/photo in `high` | implemented, `models=` |
-| 2 | ViT backward refinements: PNA, TGR, SGM | detach attention maps; zero extreme-token gradients and scale the rest; decay residual-branch gradients | PNA +15, TGR +9 over PNA, SGM +5 to +9 on unseen ViTs | none | implemented: `pna`, `tgr`, `sgm` |
-| 3 | per-surrogate gradient normalisation | rescale each member's input gradient to the ensemble mean before Adam | CSE/CWA: ViT-B 59 to 90 percent from a CNN ensemble ([2303.09105](https://arxiv.org/abs/2303.09105)); needed because option 2 shrinks the ViT gradient 10 to 50 times | one backward per surrogate (about +30 percent) | implemented: `grad_norm` |
-| 4 | token-level PatchOut and pixel-block gradient dropout | drop 20 to 35 percent of tokens through the ViT's own `mask_token` path (in-distribution: LVFace trained with masking); or keep a random subset of 8 px gradient blocks | PatchOut +8 alone, +32 with PNA | none | implemented: `token_mask`, `patchout` |
-| 5 | low-frequency perturbation prior | optimise a blurred perturbation (`delta_sigma`) or add a DCT high-frequency penalty | TESSER +11 on ViT targets; ViT phase sensitivity ([2208.09602](https://arxiv.org/abs/2208.09602)); also free JPEG robustness | none | implemented: `delta_sigma`; DCT penalty not |
+| 1 | second transformer surrogate (LVFace-L) | architecture diversity in the ensemble | face-specific: surrogate diversity is the largest lever in DPA | about 1.6x run time with two extra | **adopted**: +0.10 to +0.14 on both transformer evaluators (Z1, Z7) |
+| 2 | ViT backward refinements: PNA, TGR, SGM | detach attention maps; zero extreme-token gradients and scale the rest; decay residual-branch gradients | PNA +15, TGR +9 over PNA, SGM +5 to +9 on unseen ViTs | none | measured: PNA +0.04 on top of the extra surrogate (**adopted**); TGR harmful (-0.3, Z11/Z15/Z16); SGM neutral (Z12) |
+| 3 | per-surrogate gradient normalisation | rescale each member's input gradient to the ensemble mean before Adam | CSE/CWA: ViT-B 59 to 90 percent from a CNN ensemble ([2303.09105](https://arxiv.org/abs/2303.09105)); needed because option 2 shrinks the ViT gradient 10 to 50 times | one backward per surrogate (about +30 percent) | measured: neutral (Z17 vs Z18), kept available, off by default |
+| 4 | token-level PatchOut and pixel-block gradient dropout | drop 20 to 35 percent of tokens through the ViT's own `mask_token` path (in-distribution: LVFace trained with masking); or keep a random subset of 8 px gradient blocks | PatchOut +8 alone, +32 with PNA | none | measured: token masking small plus (**adopted**, 0.3 on augmented steps); pixel-grid PatchOut harmful (Z4, Z5) |
+| 5 | low-frequency perturbation prior | optimise a blurred perturbation (`delta_sigma`) or add a DCT high-frequency penalty | TESSER +11 on ViT targets; ViT phase sensitivity ([2208.09602](https://arxiv.org/abs/2208.09602)); also free JPEG robustness | none | measured: blurred delta loses on every evaluator at this budget (Z14); a DCT penalty is untested |
 | 6 | spectrum and geometric EOT views | SSA DCT-coefficient scaling, mild per-quadrant scale/rotate (SIA), random resized crop with re-alignment (S4ST) | SSA and SIA are the only CNN-era input methods that reach 50 percent on ViT-B in the 2026 benchmark ([2602.23117](https://arxiv.org/abs/2602.23117)) | one extra view type | not implemented |
 | 7 | clean feature mixup (CFM / FTM) | mix intermediate features with those of other faces in the batch during the forward pass | best targeted objective in the benchmark: ViT-B 21.6 vs 2.4 percent for the logit loss ([2305.14846](https://arxiv.org/abs/2305.14846)); FTM +20 more with a ViT surrogate ([2411.15553](https://arxiv.org/abs/2411.15553)) | forward hooks on IResNet stages and ViT blocks | not implemented |
 | 8 | stochastic ViT self-augmentation | per step: attention-score scaling, head dropping, MLP token mixing (ViT-EnsembleAttack, [2508.12384](https://arxiv.org/abs/2508.12384)) | ViT ensembles: 70 to 99 percent on unseen ViTs | one extra forward per copy | not implemented |

@@ -158,6 +158,51 @@ the hardest, as the ensemble holds one transformer. The harness assigns one targ
 identity because that is how independent users behave; a single shared target is kept as an
 option and gives higher numbers on the ResNet evaluators and lower on the transformer.
 
+## 11. Two more transformer surrogates and the attention-detached gradient, for transfer to transformers
+
+**Decision.** `mid` and `high` use five surrogates: the three of decision 2 plus LVFace-L and
+LVFace-S (Glint360K, same code family as LVFace-B). Transformer surrogates run with `pna=True`
+(the softmax attention maps are detached in the backward pass, so input gradients flow only
+through the value path) and `token_mask=0.3` (on the augmented steps, 30 percent of the tokens
+are dropped through the network's own masked-training path). `low` is unchanged: two CNNs, no
+transformer, for CPU users. Dated 2026-09-13.
+
+**Evidence.** Measured with the harness (`eval/RESULTS.md`, rounds 5 to 7), with LVFace-T added
+as a fourth evaluator to check that gains are not specific to AdaFace ViT-B. On `high`, adding
+LVFace-L alone takes the transformer evaluators from 0.52 / 0.78 to 0.62 / 0.88 with the
+ResNets unchanged; swapping LVFace-B for LVFace-L instead gives nothing, so it is the count of
+transformers in the ensemble that matters, which is the architecture-diversity result of the
+transfer literature ([EOLT](https://arxiv.org/abs/2512.07228); DPA,
+[2411.15555](https://arxiv.org/abs/2411.15555)). PNA
+([Wei et al., AAAI 2022](https://arxiv.org/abs/2109.04176)) adds a few points on top of the extra
+surrogate and nothing without it. Token masking is the in-distribution form of PatchOut (LVFace
+is trained with token masking) and is a small plus, while PatchOut on a pixel grid is harmful.
+The final modes give 0.86 / 0.92 / 0.70 / 0.96 on `high` (from 0.82 / 0.92 / 0.52 / 0.78) and
+0.80 / 0.92 / 0.48 / 0.90 on `mid` (from 0.74 / 0.84 / 0.32 / -) on buffalo_l / antelopev2 /
+AdaFace ViT-B / LVFace-T, holding under JPEG 75, at the same DSSIM. Cost: five surrogates instead
+of three, about 1.3 times the CPU time per face in `mid` (74 s against 56 s on 8 cores) and 1.6 to
+1.9 times on a GPU.
+
+**What was tried and rejected.** Token gradient regularisation
+([TGR, CVPR 2023](https://arxiv.org/abs/2303.15754)) halves the transformer protection in every
+combination: zeroing the extreme-token gradients through 24 blocks removes most of the signal a
+targeted cosine loss needs, and the published gains are for untargeted ImageNet attacks on
+12-block models. The skip-gradient decay for transformers
+([2410.08950](https://arxiv.org/abs/2410.08950)) is neutral. A blurred (low-frequency)
+perturbation loses on every evaluator at this DSSIM budget, against the ImageNet finding that
+transformers respond to low frequencies ([2505.19613](https://arxiv.org/abs/2505.19613)): the
+budget already spends most of its energy at low frequencies, and the blur removes the part the
+recognisers see. Per-surrogate gradient normalisation neither helps nor hurts and costs 20 to 30
+percent, so it stays available but off. It was necessary for a fair test: PNA, TGR and SGM shrink
+the transformer's input gradient by one to two orders of magnitude without changing its loss,
+and a summed gradient would otherwise drop the transformer from the update.
+
+**Would change it.** A genuinely different transformer evaluator (PETALface Swin, the WebFace42M
+ViT-L, TransFace on MS1MV2, KP-RPE on WebFace12M; see `docs/FURTHER_WORK.md`) showing that the
+gain is specific to the LVFace family. Evidence that a lighter recipe (four surrogates) reaches
+the same numbers at lower cost; Z20 versus Z19 says the fifth surrogate is worth 0.06 on the
+transformer in `mid`, at the edge of the noise.
+
 ## Known limits, stated plainly
 
 - No cloak can defend against a model trained adaptively after the cloaked photos are public
@@ -178,6 +223,11 @@ Papers
 - Deng et al., *ArcFace: Additive Angular Margin Loss for Deep Face Recognition*, CVPR 2019. https://arxiv.org/abs/1801.07698
 - Guo et al., *Sample and Computation Redistribution for Efficient Face Detection* (SCRFD), ICLR 2022. https://arxiv.org/abs/2105.04714
 - Sun et al., *Transferable Adversarial Facial Images for Privacy Protection*, ACM MM 2024. https://arxiv.org/abs/2408.01428
+- Wei et al., *Towards Transferable Adversarial Attacks on Vision Transformers* (PNA, PatchOut), AAAI 2022. https://arxiv.org/abs/2109.04176
+- Zhang et al., *Token Gradient Regularization*, CVPR 2023. https://arxiv.org/abs/2303.15754
+- Wang et al., generalised skip gradient method for ViTs, 2024. https://arxiv.org/abs/2410.08950
+- TESSER (spectral prior for ViT transfer), 2025. https://arxiv.org/abs/2505.19613
+- Zhou et al., *Diverse Parameter Augmentation* (DPA) for face-recognition transfer, CVPR 2025. https://arxiv.org/abs/2411.15555
 - Radiya-Dixit's result is also discussed in *An Assessment of Image-Cloaking Techniques* (Florida Tech thesis). https://repository.fit.edu/cgi/viewcontent.cgi?article=1793&context=etd
 
 Code and weights
