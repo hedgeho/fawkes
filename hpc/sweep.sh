@@ -9,6 +9,8 @@
 # eval/work/sweep so the clean photos' embeddings are computed once (sqlite cache).
 #   hpc submit hpc/sweep.sh            # all configurations below
 #   hpc submit hpc/sweep.sh A C        # a subset, by label
+# SWEEP_WORKDIR (default eval/work/sweep) selects the workdir; two jobs must not share one, as the
+# cloaked files are written next to the inputs.
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/..}"
 export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
@@ -16,6 +18,7 @@ export UV_CACHE_DIR=/scratch/work/zalessi1/.uv-cache
 export HF_HUB_OFFLINE=1
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-6}"
 EV=(--evaluator buffalo_l --evaluator antelopev2 --evaluator adaface_vit_b --evaluator lvface_t)
+WORK="${SWEEP_WORKDIR:-eval/work/sweep}"
 
 # label | mode | extra harness arguments (cloak overrides and flags) | "jpeg" to also evaluate a JPEG-75 copy
 # Round 1 (2026-09-12, results in eval/results/*_[A-K].json): the residual penalty (self_weight)
@@ -60,6 +63,17 @@ CONFIGS=(
   "Z6|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_l|"
   "Z7|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l,lvface_s --cloak-arg pna=1|"
   "Z8|mid|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg pna=1|"
+  # Round 6 (2026-09-13): the transformer switches on the four-surrogate ensemble with per-surrogate
+  # gradient normalisation (the switches shrink the ViT gradient 10-50x, so without it they drop the
+  # ViT out of the update). Z16: the same switches on the original three surrogates.
+  "Z9|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg grad_norm=1|"
+  "Z10|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg grad_norm=1 --cloak-arg pna=1|"
+  "Z11|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg grad_norm=1 --cloak-arg pna=1 --cloak-arg tgr=0.25|"
+  "Z12|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg grad_norm=1 --cloak-arg pna=1 --cloak-arg sgm=0.6|"
+  "Z13|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg grad_norm=1 --cloak-arg pna=1 --cloak-arg token_mask=0.3|"
+  "Z14|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg grad_norm=1 --cloak-arg delta_sigma=1.0|"
+  "Z15|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg grad_norm=1 --cloak-arg pna=1 --cloak-arg tgr=0.25 --cloak-arg sgm=0.6 --cloak-arg token_mask=0.3|"
+  "Z16|high|--cloak-arg grad_norm=1 --cloak-arg pna=1 --cloak-arg tgr=0.25|"
 )
 want=("$@")
 for cfg in "${CONFIGS[@]}"; do
@@ -68,12 +82,12 @@ for cfg in "${CONFIGS[@]}"; do
   echo "=== $label $mode $extra  $(date)"
   # shellcheck disable=SC2086
   uv run python eval/harness.py --cloaker v2 --mode "$mode" --batch-size 16 --tag "$label" \
-    --workdir eval/work/sweep "${EV[@]}" $extra
+    --workdir "$WORK" "${EV[@]}" $extra
   if [ "$jpeg" = "jpeg" ]; then
     echo "=== $label jpeg75  $(date)"
     # shellcheck disable=SC2086
     uv run python eval/harness.py --cloaker v2 --mode "$mode" --tag "$label" --jpeg 75 --skip-cloak \
-      --workdir eval/work/sweep "${EV[@]}" $extra
+      --workdir "$WORK" "${EV[@]}" $extra
   fi
 done
 echo "=== done $(date)"
