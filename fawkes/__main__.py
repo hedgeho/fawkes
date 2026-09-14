@@ -4,7 +4,9 @@
 # @Link    : https://www.shawnshan.com/
 
 
+import sys
+
 from .protection import main
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

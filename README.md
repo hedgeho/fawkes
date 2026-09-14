@@ -21,11 +21,18 @@ This fork is a rewrite of the cloaking pipeline (version 2):
 
 The reasons behind these choices, with sources, are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
-Copyright
----------
-This code is intended only for personal privacy protection or academic research. The pretrained
-recogniser weights it downloads are licensed for non-commercial research use only (see
-[Model licences](#model-licences)).
+Licence
+-------
+The code in this repository is released under the BSD-3-Clause licence (see [LICENSE](LICENSE));
+it is a derivative of the original Fawkes by SANDLAB, University of Chicago, under the same licence.
+The network definitions vendored in `fawkes/arch/` come from InsightFace and CVLface (MIT, notices
+kept in the file headers).
+
+That licence covers the code only. The pretrained detector and recogniser weights the tool downloads
+from Hugging Face are **not** part of this repository and carry their own terms: every one of them is
+licensed for non-commercial research use only (see [Model licences](#model-licences)). In practice
+this means the tool as a whole may be used for personal privacy protection and academic research,
+but not commercially, regardless of the code licence.
 
 Usage
 -----
@@ -170,11 +177,6 @@ uv run pytest
 
 Tests that need the surrogate weights run only when they are already in `fawkes/model/`. Tests that
 need real photos run when `FAWKES_TEST_IMAGES` points to a directory of photos containing faces.
-
-GUI
----
-
-`app/app.py` is a small PyQt5 front end: pick the images, pick the target photo folder, protect.
 
 Academic Research Usage
 -----------------------

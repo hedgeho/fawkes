@@ -210,7 +210,8 @@ def main(*argv):
                        eot_samples=0 if args.no_eot else None, threads=args.threads, seed=args.seed,
                        batch_size=args.batch_size, verbose=args.debug, device=args.device,
                        self_weight=args.self_weight)
-    return protector.run_protection(image_paths, format=args.format, no_align=args.no_align, debug=args.debug)
+    status = protector.run_protection(image_paths, format=args.format, no_align=args.no_align, debug=args.debug)
+    return 0 if status == 1 else status  # process exit code: 0 on success, 2 no face, 3 no image
 
 
 if __name__ == '__main__':

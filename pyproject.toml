@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fawkes"
 dynamic = ["version"]
-description = "An utility to protect user privacy"
+description = "An utility to protect user privacy against mass face recognition"
 readme = "README.md"
-license = { text = "BSD" }
-authors = [{ name = "Shawn Shan", email = "shawnshan@cs.uchicago.edu" }]
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "Ilia Zalesskii", email = "github@ilia.fi"}, { name = "Shawn Shan", email = "shawnshan@cs.uchicago.edu" }]
 keywords = ["fawkes", "privacy", "ML"]
 requires-python = ">=3.11"
 classifiers = [
@@ -34,13 +34,13 @@ cpu = ["torch>=2.4"]
 cu128 = ["torch>=2.4"]
 
 [project.urls]
-Homepage = "https://github.com/Shawn-Shan/fawkes"
+Homepage = "https://github.com/hedgeho/fawkes"
 
 [project.scripts]
 fawkes = "fawkes:main"
 
 [tool.setuptools]
-packages = ["fawkes"]
+packages = ["fawkes", "fawkes.arch"]
 
 [tool.setuptools.dynamic]
 version = { attr = "fawkes.__version__" }
