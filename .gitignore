@@ -7,6 +7,7 @@ keras/datasets/data/*
 keras/datasets/temp/*
 tags
 fawkes.egg-info
+data
 
 # test-related
 .coverage
