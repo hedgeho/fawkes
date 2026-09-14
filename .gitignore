@@ -26,3 +26,7 @@ fawkes/model/
 # evaluation harness data and results
 eval/work/
 eval/results/
+
+# site-specific cluster wrappers and make targets
+cluster/
+Makefile.local

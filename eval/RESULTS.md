@@ -18,7 +18,7 @@ git history of `fawkes/protection.py`; the final modes are the last block.
 | mid (3 surrogates, 60 steps, eps 12, budget 0.012) | 0.04 | 0.10 | 0.00 | 0.012 |
 | high (120 steps, eps 16, budget 0.017) | 0.54 | 0.62 | 0.00 | 0.016 |
 
-## Rounds 1 to 4: sweep (`hpc/sweep.sh`)
+## Rounds 1 to 4: sweep (`eval/sweep.sh`)
 
 | label | base | changes | buffalo_l | antelopev2 | adaface_vit_b | DSSIM face |
 |---|---|---|---|---|---|---|
@@ -117,7 +117,7 @@ What these rounds say:
   switches fairly: PNA, TGR and SGM shrink the transformer's input gradient 10 to 50 times.
 - The gains survive JPEG 75 (Z17, Z19).
 
-## Final modes of 2026-09-13 (`hpc/harness.sh`, five surrogates in mid and high)
+## Final modes of 2026-09-13 (`eval/run_mode.sh`, five surrogates in mid and high)
 
 Same protocol; `low` is unchanged from 2026-09-12 (no transformer surrogate) and not re-run. The
 high run repeats configuration Z17 with a different GPU allocation; the two agree within 0.04 on
@@ -151,7 +151,7 @@ classifier they land on. Mid on the transformer evaluator is the one cell where 
 is clearly easier to beat (0.55 against 0.48), which is expected, since a probe fitted on cloaked
 photos has partly learned the cloak direction.
 
-## Final modes of 2026-09-12 (`hpc/harness.sh`, three surrogates)
+## Final modes of 2026-09-12 (`eval/run_mode.sh`, three surrogates)
 
 | mode | buffalo_l | antelopev2 | adaface_vit_b | DSSIM face | s/photo A100 |
 |---|---|---|---|---|---|

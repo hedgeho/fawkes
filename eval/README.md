@@ -41,8 +41,8 @@ insightface packs (`~/.insightface/models`). insightface extracts `antelopev2.zi
 `antelopev2/antelopev2/` folder and then fails to find it; move the `.onnx` files one level up.
 
 Results go to `eval/results/<timestamp>_<cloaker>_<mode>[_tag][_jpegQ][_cleangallery][_smoke].json` together with
-all arguments and the identity split, and a markdown table is printed. `hpc/sweep.sh` runs a list of
-configurations on a Slurm GPU node.
+all arguments and the identity split, and a markdown table is printed. `eval/sweep.sh` runs a list of
+configurations; `eval/run_mode.sh <mode>` measures one mode the way RESULTS.md reports it.
 
 ## Protocol
 

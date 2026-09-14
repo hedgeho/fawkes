@@ -1,19 +1,9 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=fawkes-smoke
-#SBATCH --time=00:25:00
-#SBATCH --mem=24G
-#SBATCH --cpus-per-task=4
-#SBATCH --gpus=1
-#SBATCH --output=out/%x_%j.out
-# Smoke test on a GPU node: test suite, then one mid-mode cloak of the sample photo with timing.
+# Smoke test: test suite, model bench, then one mid-mode cloak of a few LFW photos with timing.
 set -euo pipefail
-cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/..}"
-export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
-export UV_CACHE_DIR=/scratch/work/zalessi1/.uv-cache
-export HF_HUB_OFFLINE=1
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
-nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
-uv run python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+cd "$(dirname "$0")/.."
+command -v nvidia-smi >/dev/null && nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+uv run python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
 uv run pytest -q -x
 uv run python -m fawkes.models bench --batch 8 || true
 rm -rf out/smoke && mkdir -p out/smoke/imgs out/smoke/target

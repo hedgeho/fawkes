@@ -154,6 +154,13 @@ Plain `pip install torch .` also works on Python 3.11 or newer. The face detecto
 weights (about 930 MB for `mid`, 250 MB for `low`) are downloaded from Hugging Face on first use
 into `fawkes/model/`; `python -m fawkes.models download` prefetches them.
 
+### GPU
+
+Optional. The cloaker uses CUDA when torch can see it, else the CPU. Install with the `cu128` extra
+(pip users: a CUDA build of torch from [pytorch.org](https://pytorch.org/get-started/locally/)); force
+a device with `--device` or `FAWKES_DEVICE`. Without internet at run time, prefetch the weights with
+`python -m fawkes.models download` and set `HF_HUB_OFFLINE=1`.
+
 Model licences
 --------------
 
