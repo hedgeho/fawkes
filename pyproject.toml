@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fawkes"
 dynamic = ["version"]
-description = "An utility to protect user privacy against mass face recognition"
+description = "Image cloaking against automated face recognition"
 readme = "README.md"
 license = { text = "BSD-3-Clause" }
-authors = [{ name = "Ilia Zalesskii", email = "github@ilia.fi"}, { name = "Shawn Shan", email = "shawnshan@cs.uchicago.edu" }]
+authors = [{ name = "Ilia Zalesskii", email = "code@ilia.fi"}, { name = "Shawn Shan", email = "shawnshan@cs.uchicago.edu" }]
 keywords = ["fawkes", "privacy", "ML"]
 requires-python = ">=3.11"
 classifiers = [
