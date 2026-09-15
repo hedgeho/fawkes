@@ -117,6 +117,107 @@ What these rounds say:
   switches fairly: PNA, TGR and SGM shrink the transformer's input gradient 10 to 50 times.
 - The gains survive JPEG 75 (Z17, Z19).
 
+## Round 8 (2026-09-15): visible tint
+
+The final cloaks leave smooth reddish / yellowish patches on the skin. Measured on real photos,
+the perturbation's mean colour is zero but its low-frequency chroma carries as much energy as its
+low-frequency luma: SSIM is nearly blind to a smooth shift, the L-inf bound is per channel, and
+the JPEG view rewards chroma that is smooth. Two new `CloakParams` fields: `chroma_eps` clamps
+the Cb/Cr of the perturbation after every step (0 = grey cloak), `chroma_weight` penalises its
+mean Cb/Cr magnitude. Two new harness columns, computed in the face box on the difference between
+the cloaked and the clean photo: *chroma LF* and *luma LF* are the rms of the Cb/Cr and of the Y
+component after a Gaussian low-pass with sigma 2 percent of the box (the smooth patches a viewer
+sees). T0 repeats the final mid mode on the same GPU as the baseline.
+
+| label | base | changes | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | DSSIM face | chroma LF | luma LF |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T0 | mid | (final mid) | 0.80 | 0.90 | 0.48 | 0.92 | 0.012 | 2.00 | 1.42 |
+| T1 | mid | chroma_eps 4 | 0.72 | 0.86 | 0.28 | 0.90 | 0.013 | 1.26 | 1.61 |
+| T2 | mid | chroma_eps 2 | 0.74 | 0.86 | 0.18 | 0.90 | 0.013 | 0.73 | 1.85 |
+| T2 jpeg | | JPEG 75 | 0.64 | 0.84 | 0.18 | 0.84 | | | |
+| T3 | mid | chroma_eps 0 (grey) | 0.62 | 0.78 | 0.10 | 0.84 | 0.013 | 0.09 | 1.98 |
+| T3 jpeg | | JPEG 75 | 0.62 | 0.72 | 0.10 | 0.78 | | | |
+| T4 | mid | chroma_weight 30 | 0.76 | 0.88 | 0.34 | 0.90 | 0.013 | 0.91 | 1.44 |
+| T5 | mid | chroma_weight 100 | 0.70 | 0.84 | 0.14 | 0.86 | 0.013 | 0.26 | 1.52 |
+| T6 | mid | chroma_eps 2, eps 12 | 0.60 | 0.76 | 0.14 | 0.82 | 0.013 | 0.71 | 1.58 |
+| T7 | high | chroma_eps 2 | 0.84 | 0.92 | 0.40 | 0.96 | 0.017 | 0.79 | 2.48 |
+| T8 | high | chroma_eps 0 (grey) | 0.74 | 0.84 | 0.18 | 0.98 | 0.018 | 0.10 | 2.66 |
+
+What round 8 says:
+
+- Colour is doing real work for the transformer evaluator. Removing it entirely (T3) keeps most
+  of the ResNet protection but drops AdaFace ViT-B from 0.48 to 0.10; the bound at 2 (T2) is
+  hardly better on that evaluator. The luma-only cloak is not an option at this budget.
+- The soft penalty is the better lever: at weight 30 (T4) the visible chroma halves for a loss of
+  0.04 on the ResNets and 0.14 on the transformer, better on every column than the hard bound at
+  4 (T1), which removes less chroma. The penalty leaves colour where the surrogates need it and
+  removes it elsewhere; the bound cuts everywhere.
+- The lost transfer is not recovered by a smaller luma bound (T6) and not fully by the high mode
+  either: high with chroma bound 2 (T7) is back to the ResNet numbers of the unbounded mid and
+  0.40 on the transformer, at the high DSSIM budget.
+
+## Round 9 (2026-09-15): the chroma penalty weight
+
+| label | base | changes | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | DSSIM face | chroma LF | luma LF |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T0 | mid | (final mid) | 0.80 | 0.90 | 0.48 | 0.92 | 0.012 | 2.00 | 1.42 |
+| T9 | mid | chroma_weight 10 | 0.82 | 0.90 | 0.46 | 0.92 | 0.012 | 1.45 | 1.40 |
+| T10 | mid | chroma_weight 20 | 0.80 | 0.90 | 0.42 | 0.92 | 0.013 | 1.13 | 1.42 |
+| T10 jpeg | | JPEG 75 | 0.70 | 0.86 | 0.34 | 0.92 | | | |
+| T4 | mid | chroma_weight 30 | 0.76 | 0.88 | 0.34 | 0.90 | 0.013 | 0.91 | 1.44 |
+| T11 | mid | chroma_weight 50 | 0.72 | 0.84 | 0.18 | 0.92 | 0.013 | 0.62 | 1.49 |
+| T12 | mid | chroma_weight 30, 120 steps | 0.78 | 0.88 | 0.40 | 0.88 | 0.013 | 0.93 | 1.68 |
+| T15 | mid | chroma_weight 30, eps 20 | 0.84 | 0.94 | 0.42 | 0.92 | 0.012 | 0.93 | 1.53 |
+| T13 | high | chroma_weight 30 | 0.82 | 0.96 | 0.52 | 0.94 | 0.016 | 0.92 | 1.89 |
+| T13 jpeg | | JPEG 75 | 0.82 | 0.88 | 0.48 | 0.94 | | | |
+| T14 | high | chroma_weight 60 | 0.80 | 0.90 | 0.44 | 0.94 | 0.017 | 0.50 | 1.98 |
+
+What round 9 says:
+
+- The penalty trades smoothly: each step of 10 in the weight removes about a quarter of the
+  remaining visible chroma. Up to weight 20 the protection is within run-to-run noise of the
+  baseline (T9, T10); at 30 the transformer evaluator loses 0.14 (T4); at 50 it collapses (T11).
+- More steps do not buy the lost transfer back (T12), a larger luma bound does: weight 30 with
+  eps 20 (T15) has half the chroma of the baseline and the same or better protection on every
+  evaluator at the same DSSIM. The chroma the penalty removes is replaced by luma detail, which
+  the DSSIM budget, not the L-inf bound, was limiting.
+- In high mode weight 30 halves the chroma for a loss of 0.18 on the transformer against the
+  2026-09-13 high (T13); weight 60 is too much (T14). Round 10 checks the eps 20 lever there.
+
+## Round 10 (2026-09-15): the penalty with a larger luma bound
+
+T16 repeats the final high mode on the same day as the baseline; T17 repeats T15 for a noise
+estimate (agreement within 0.04 on every evaluator).
+
+| label | base | changes | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | DSSIM face | chroma LF | luma LF |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T0 | mid | (final mid of 2026-09-13) | 0.80 | 0.90 | 0.48 | 0.92 | 0.012 | 2.00 | 1.42 |
+| T19 | mid | chroma_weight 20, eps 20 | 0.88 | 0.92 | 0.44 | 0.94 | 0.012 | 1.17 | 1.51 |
+| T17 | mid | chroma_weight 30, eps 20 | 0.88 | 0.92 | 0.40 | 0.90 | 0.012 | 0.93 | 1.53 |
+| T17 jpeg | | JPEG 75 | 0.76 | 0.88 | 0.30 | 0.90 | | | |
+| T22 | mid | chroma_weight 30, eps 24 | 0.88 | 0.96 | 0.48 | 0.94 | 0.012 | 0.94 | 1.59 |
+| T18 | mid | chroma_weight 40, eps 20 | 0.80 | 0.92 | 0.34 | 0.92 | 0.013 | 0.75 | 1.56 |
+| T16 | high | (final high of 2026-09-13) | 0.90 | 0.94 | 0.70 | 0.96 | 0.017 | 2.41 | 1.80 |
+| T20 | high | chroma_weight 30, eps 20 | 0.92 | 1.00 | 0.62 | 0.98 | 0.017 | 0.93 | 2.11 |
+| T20 jpeg | | JPEG 75 | 0.88 | 0.96 | 0.62 | 0.98 | | | |
+| T21 | high | chroma_weight 60, eps 20 | 0.88 | 0.92 | 0.54 | 0.96 | 0.017 | 0.48 | 2.20 |
+
+What round 10 says:
+
+- With the luma bound raised the penalty is free. `mid` with weight 30 and eps 24 (T22) has half
+  the visible chroma of the baseline and equal or better protection on all four evaluators at
+  the same DSSIM; eps 20 (T17) is 0.04 to 0.08 lower on the transformer, eps 24 recovers it.
+  The DSSIM budget, not the pixel bound, limits the luma, and the penalty moves the budget from
+  colour to luminance detail (luma LF 1.42 to 1.59).
+- The same holds in `high`: weight 30 with eps 20 (T20) is within noise of the same-day
+  baseline on three evaluators and 0.08 lower on AdaFace ViT-B, at 40 percent of the chroma,
+  and holds under JPEG 75. Weight 60 (T21) removes 80 percent of the chroma but costs 0.16 on
+  the transformer.
+- Under JPEG 75 the mid cloak with the penalty loses more on the transformer (0.30 for T17
+  against 0.44 for the old mid) than clean; the final-mode run below measures this for eps 24.
+- Weight 40 (T18) is already past the knee. The new defaults are weight 30 with eps 24 in `mid`
+  and eps 20 in `high` (decision 12).
+
 ## Final modes of 2026-09-13 (`eval/run_mode.sh`, five surrogates in mid and high)
 
 Same protocol; `low` is unchanged from 2026-09-12 (no transformer surrogate) and not re-run. The

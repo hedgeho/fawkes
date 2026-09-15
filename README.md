@@ -51,24 +51,26 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
 * `-m`, `--mode`: `low`, `mid` (default) or `high`, the tradeoff between protection strength,
   visible change and run time:
 
-  | mode | surrogates | steps | max pixel change | DSSIM budget | robustness views | s / face, 8-core CPU |
-  |---|---|---|---|---|---|---|
-  | low | AdaFace IR-101, ArcFace IR-100 | 60 | 16 | 0.012 | blur, resize, JPEG | 35 |
-  | mid | + LVFace-B, LVFace-L, LVFace-S (transformers) | 60 | 16 | 0.012 | blur, resize, JPEG | 74 |
-  | high | same five | 200 | 16 | 0.017 | blur, resize, JPEG | about 250 (estimated) |
+  | mode | surrogates | steps | max pixel change | DSSIM budget | colour penalty | robustness views | s / face, 8-core CPU |
+  |---|---|---|---|---|---|---|---|
+  | low | AdaFace IR-101, ArcFace IR-100 | 60 | 16 | 0.012 | - | blur, resize, JPEG | 35 |
+  | mid | + LVFace-B, LVFace-L, LVFace-S (transformers) | 60 | 24 | 0.012 | 30 | blur, resize, JPEG | 74 |
+  | high | same five | 200 | 20 | 0.017 | 30 | blur, resize, JPEG | about 250 (estimated) |
 
   Every mode also penalises what is left of your own identity in the cloaked face
   (`--self-weight`, see [docs/DECISIONS.md](docs/DECISIONS.md#10-penalise-the-residual-similarity-to-the-own-face-not-only-the-distance-to-the-target)).
+  `mid` and `high` penalise the colour part of the cloak, which is what shows as reddish or
+  yellowish patches on the skin, and spend the DSSIM budget on luma detail instead
+  (`--chroma-weight`, [decision 12](docs/DECISIONS.md#12-penalise-the-colour-of-the-cloak-and-raise-the-luma-bound)).
   On a CUDA GPU all modes take a second or two per face.
 
 * `--models`: comma-separated surrogate keys overriding the mode (`python -m fawkes.models list`).
 * `--steps`, `--eps`, `--th`, `--no-eot`, `--self-weight`: override the mode's steps, pixel bound,
   DSSIM budget, robustness views and residual penalty.
-* `--chroma-eps`: bound on the colour (Cb/Cr) part of the cloak in 0-255 units, `0` for a
-  grey (luma-only) cloak. Unbounded by default; a small value removes the reddish / yellowish
-  patches a cloak can leave on the skin at some cost in protection (see the round-8 sweep in
-  [eval/RESULTS.md](eval/RESULTS.md)). `--chroma-weight` is the soft version, a penalty on the
-  mean colour change.
+* `--chroma-weight`: penalty on the colour (Cb/Cr) part of the cloak (30 in `mid` and `high`,
+  0 in `low`). Higher values leave less visible tint and, above about 30, less protection;
+  `--chroma-eps` is a hard bound on the colour change instead (0-255 units, `0` for a grey cloak),
+  which costs more protection for the same tint (rounds 8 to 10 in [eval/RESULTS.md](eval/RESULTS.md)).
 * `--batch-size`: faces optimised together (default 8; larger batches are faster per face).
 * `--threads`: CPU threads for PyTorch.
 * `--no-align`: the inputs are already 112x112 aligned faces; skip detection.

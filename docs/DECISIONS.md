@@ -203,6 +203,49 @@ gain is specific to the LVFace family. Evidence that a lighter recipe (four surr
 the same numbers at lower cost; Z20 versus Z19 says the fifth surrogate is worth 0.06 on the
 transformer in `mid`, at the edge of the noise.
 
+## 12. Penalise the colour of the cloak and raise the luma bound
+
+**Decision.** `mid` and `high` add `chroma_weight=30`, a penalty on the mean Cb/Cr magnitude of the
+perturbation, and raise the L-infinity bound from 16 to 24 (`mid`) and 20 (`high`) at unchanged
+DSSIM budgets. `low` is unchanged (not measured). Dated 2026-09-15.
+
+**Evidence.** On real photos the final cloaks of decision 11 look like smooth reddish and
+yellowish patches on the skin, which reads as an unhealthy complexion. Measured on those photos
+the mean colour shift is zero; what shows is that the perturbation's low-frequency chroma carries
+as much energy as its low-frequency luma. Three parts of the objective push it there: SSIM is
+nearly blind to a smooth shift, and blind on textureless skin where its structure term is
+dominated by its constant; the L-infinity bound is per RGB channel, so a patch may be +16 red and
+-16 blue at once; and the differentiable JPEG view quantises high-frequency chroma with table
+value 99, so only smooth chroma survives the augmented steps and the optimiser learns to prefer it.
+
+Rounds 8 to 10 of the harness (`eval/RESULTS.md`, new columns *chroma LF* and *luma LF*, the rms
+of the low-passed Cb/Cr and Y of the difference in the face box) compare a hard bound on the
+chroma with a penalty. The bound loses most of the transformer transfer: a grey cloak keeps 0.62 /
+0.78 on the ResNets but drops AdaFace ViT-B from 0.48 to 0.10 in `mid`; colour is doing real work
+for that evaluator. The penalty trades smoothly, a quarter of the remaining chroma per 10 of
+weight, and at 30 it halves the visible chroma for 0.14 on the transformer. That loss is not
+recovered by more steps but is by a larger luma bound: with eps 24 the `mid` cloak has half the
+chroma of the old one and 0.88 / 0.96 / 0.48 / 0.94 against 0.80 / 0.90 / 0.48 / 0.92 for the old
+`mid` on the same GPU at the same DSSIM (0.012); `high` with weight 30 and eps 20 gives 0.92 /
+1.00 / 0.62 / 0.98 against 0.90 / 0.94 / 0.70 / 0.96, holding under JPEG 75. The DSSIM budget,
+not the pixel bound, was limiting the luma; the penalty moves the budget from colour to
+luminance detail, which the recognisers use and a viewer tolerates far better. A repeat of one
+configuration on another GPU allocation agrees within 0.04, the noise of these numbers.
+
+**What was tried and rejected.** Hard chroma bounds of 4, 2 and 0 (rounds 8); weight 50 and above
+(the transformer collapses); weight 30 with more steps (no gain); weight 60 in `high` (80 percent
+of the chroma removed, but the transformer loses 0.16 with eps 20 and 0.26 with eps 16). A chroma-only budget in the opposite sense (hiding the
+cloak in colour, [2003.00883](https://arxiv.org/abs/2003.00883)) was already listed as not
+recommended and this result agrees: colour is where the cloak is seen, not where it hides.
+
+**Would change it.** A perceptual metric in the loop that sees smooth colour, so the budget itself
+rather than an added penalty governs the tint (DSSIM in an opponent colour space, or a
+low-frequency chroma term in the constraint). A texture-masked bound that hides the luma part in
+hair, brows and edges instead of smooth skin, which would address the remaining visible change,
+the darker contouring around the eyes and nose that the transfer to 112-pixel models requires.
+Choosing a target with a similar skin tone to the user's would reduce the pressure toward colour
+in the first place and is worth a check for the target advice.
+
 ## Known limits, stated plainly
 
 - No cloak can defend against a model trained adaptively after the cloaked photos are public

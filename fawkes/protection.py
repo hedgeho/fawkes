@@ -16,17 +16,19 @@ from fawkes.utils import dump_image, filter_image_paths
 # steps / eps (L-inf, 0-255) / dssim_budget: perturbation size; eot_samples: robustness views per
 # step; self_weight: penalty on the remaining similarity to the own face; laggard: weight the surrogate
 # furthest from the target; stop_cos: a face is done once every surrogate sees the target at this
-# cosine; pna / token_mask: transformer-surrogate gradient and token-dropout switches. Tuned with
-# eval/harness.py on 2026-09-12/13 (see docs/DECISIONS.md, decisions 10 and 11).
+# cosine; pna / token_mask: transformer-surrogate gradient and token-dropout switches; chroma_weight:
+# penalty on the colour (Cb/Cr) part of the cloak, which is what a viewer sees as a tint, paid for
+# with a larger luma bound at the same DSSIM. Tuned with eval/harness.py on 2026-09-12/13/15 (see
+# docs/DECISIONS.md, decisions 10 to 12).
 MODES = {
     'low': dict(models=["adaface_ir101", "arcface_r100"], steps=60, eps=16.0, dssim_budget=0.012,
                 eot_samples=2, self_weight=2.0, stop_cos=0.9),
     'mid': dict(models=["arcface_r100", "adaface_ir101", "lvface_b", "lvface_l", "lvface_s"], steps=60,
-                eps=16.0, dssim_budget=0.012, eot_samples=2, self_weight=1.0, stop_cos=0.9,
-                pna=True, token_mask=0.3),
+                eps=24.0, dssim_budget=0.012, eot_samples=2, self_weight=1.0, stop_cos=0.9,
+                pna=True, token_mask=0.3, chroma_weight=30.0),
     'high': dict(models=["arcface_r100", "adaface_ir101", "lvface_b", "lvface_l", "lvface_s"], steps=200,
-                 eps=16.0, dssim_budget=0.017, eot_samples=5, self_weight=2.0, laggard=0.1, stop_cos=0.99,
-                 pna=True, token_mask=0.3),
+                 eps=20.0, dssim_budget=0.017, eot_samples=5, self_weight=2.0, laggard=0.1, stop_cos=0.99,
+                 pna=True, token_mask=0.3, chroma_weight=30.0),
 }
 
 
