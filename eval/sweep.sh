@@ -85,6 +85,16 @@ CONFIGS=(
   "T6|mid|--cloak-arg chroma_eps=2 --cloak-arg eps=12|"
   "T7|high|--cloak-arg chroma_eps=2|"
   "T8|high|--cloak-arg chroma_eps=0|"
+  # Round 9: the hard bound loses most of the transformer transfer (T1-T3), the soft penalty at weight
+  # 30 (T4) halves the visible chroma for a few points. Map the penalty weight, give it more steps,
+  # a larger luma bound, and try it in high mode.
+  "T9|mid|--cloak-arg chroma_weight=10|"
+  "T10|mid|--cloak-arg chroma_weight=20|jpeg"
+  "T11|mid|--cloak-arg chroma_weight=50|"
+  "T12|mid|--cloak-arg chroma_weight=30 --cloak-arg steps=120|"
+  "T13|high|--cloak-arg chroma_weight=30|jpeg"
+  "T14|high|--cloak-arg chroma_weight=60|"
+  "T15|mid|--cloak-arg chroma_weight=30 --cloak-arg eps=20|"
 )
 want=("$@")
 for cfg in "${CONFIGS[@]}"; do

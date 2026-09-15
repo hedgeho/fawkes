@@ -64,6 +64,11 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
 * `--models`: comma-separated surrogate keys overriding the mode (`python -m fawkes.models list`).
 * `--steps`, `--eps`, `--th`, `--no-eot`, `--self-weight`: override the mode's steps, pixel bound,
   DSSIM budget, robustness views and residual penalty.
+* `--chroma-eps`: bound on the colour (Cb/Cr) part of the cloak in 0-255 units, `0` for a
+  grey (luma-only) cloak. Unbounded by default; a small value removes the reddish / yellowish
+  patches a cloak can leave on the skin at some cost in protection (see the round-8 sweep in
+  [eval/RESULTS.md](eval/RESULTS.md)). `--chroma-weight` is the soft version, a penalty on the
+  mean colour change.
 * `--batch-size`: faces optimised together (default 8; larger batches are faster per face).
 * `--threads`: CPU threads for PyTorch.
 * `--no-align`: the inputs are already 112x112 aligned faces; skip detection.
