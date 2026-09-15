@@ -375,11 +375,34 @@ def verification_metrics(cloaked, clean_train, test_by_id, threshold=VERIFICATIO
             "threshold": threshold}
 
 
+def chroma_stats(a, b, lf_fraction=0.02):
+    """Visible-tint statistics of the difference b - a (HxWx3 uint8 arrays, the face box).
+
+    The difference is split into luma and Cb/Cr chroma (BT.601). Returns the rms chroma magnitude,
+    and the rms of the chroma and luma after a Gaussian low-pass with sigma = `lf_fraction` of the
+    longer side (2 percent of the face: the smooth colour patches a viewer sees as a tint, as
+    opposed to the fine texture SSIM already measures)."""
+    from scipy.ndimage import gaussian_filter
+    d = b.astype(np.float32) - a.astype(np.float32)
+    r, g, bl = d[..., 0], d[..., 1], d[..., 2]
+    y = 0.299 * r + 0.587 * g + 0.114 * bl
+    cb = -0.168736 * r - 0.331264 * g + 0.5 * bl
+    cr = 0.5 * r - 0.418688 * g - 0.081312 * bl
+    sigma = max(0.5, lf_fraction * max(d.shape[:2]))
+    lp = lambda c: gaussian_filter(c, sigma)
+    rms = lambda c: float(np.sqrt(np.mean(c ** 2)))
+    return {"chroma_rms": rms(np.sqrt(cb ** 2 + cr ** 2)),
+            "chroma_lf_rms": rms(np.sqrt(lp(cb) ** 2 + lp(cr) ** 2)),
+            "luma_lf_rms": rms(lp(y))}
+
+
 def image_quality(pairs):
     """pairs: list of (clean_png, cloaked_png). Mean PSNR and DSSIM over the whole photo, plus DSSIM
-    over the bounding box of the changed pixels (the face crop, for cloakers that only touch the face)."""
+    and the luma / chroma statistics of `chroma_stats` over the bounding box of the changed pixels
+    (the face crop, for cloakers that only touch the face)."""
     from skimage.metrics import structural_similarity, peak_signal_noise_ratio
     psnr, dssim, dssim_face = [], [], []
+    tint = {"chroma_rms": [], "chroma_lf_rms": [], "luma_lf_rms": []}
     for clean_p, cloaked_p in pairs:
         a = np.asarray(Image.open(clean_p).convert("RGB"))
         b = np.asarray(Image.open(cloaked_p).convert("RGB"))
@@ -394,8 +417,12 @@ def image_quality(pairs):
         fa, fb = a[ys.min():ys.max() + 1, xs.min():xs.max() + 1], b[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
         if min(fa.shape[:2]) >= 7:
             dssim_face.append((1 - structural_similarity(fa, fb, channel_axis=-1, data_range=255)) / 2)
+            for k, v in chroma_stats(fa, fb).items():
+                tint[k].append(v)
     mean = lambda v: float(np.mean(v)) if len(v) else None
-    return {"psnr": mean(psnr), "dssim": mean(dssim), "dssim_face": mean(dssim_face)}
+    out = {"psnr": mean(psnr), "dssim": mean(dssim), "dssim_face": mean(dssim_face)}
+    out.update({k + "_face": mean(v) for k, v in tint.items()})
+    return out
 
 
 # --------------------------------------------------------------------------- evaluation
@@ -455,10 +482,12 @@ def markdown_report(results):
                      f"{fmt(m['cos_cloaked_to_clean_centroid'])} | {fmt(m['cos_clean_to_clean_centroid'])} | "
                      f"{fmt(m['frac_cloaked_below_threshold'])} | {m['n_undetected']} |")
     q = results["quality"]
-    lines += ["", "| cloaked photos | uncloaked (cloaker gave no output) | PSNR dB | DSSIM photo | DSSIM face box | s/photo |",
-              "|---|---|---|---|---|---|",
+    lines += ["", "| cloaked photos | uncloaked (cloaker gave no output) | PSNR dB | DSSIM photo | DSSIM face box "
+              "| chroma rms face | chroma LF rms face | luma LF rms face | s/photo |",
+              "|---|---|---|---|---|---|---|---|---|",
               f"| {q['n_cloaked']} | {q['n_uncloaked']} | {fmt(q['psnr'], 1)} | {fmt(q['dssim'], 4)} | "
-              f"{fmt(q['dssim_face'], 4)} | {fmt(q['seconds_per_photo'], 1)} |"]
+              f"{fmt(q['dssim_face'], 4)} | {fmt(q.get('chroma_rms_face'), 2)} | {fmt(q.get('chroma_lf_rms_face'), 2)} | "
+              f"{fmt(q.get('luma_lf_rms_face'), 2)} | {fmt(q['seconds_per_photo'], 1)} |"]
     return "\n".join(lines)
 
 

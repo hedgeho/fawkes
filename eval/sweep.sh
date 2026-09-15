@@ -71,6 +71,20 @@ CONFIGS=(
   "Z18|high|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l,lvface_s --cloak-arg pna=1 --cloak-arg token_mask=0.3 --cloak-arg grad_norm=1|"
   "Z19|mid|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l,lvface_s --cloak-arg pna=1 --cloak-arg token_mask=0.3|jpeg"
   "Z20|mid|--cloak-arg models=arcface_r100,adaface_ir101,lvface_b,lvface_l --cloak-arg pna=1 --cloak-arg token_mask=0.3|"
+  # Round 8 (2026-09-15): visible tint. The cloaks look like smooth reddish / yellowish patches on the
+  # skin: SSIM is nearly blind to low-frequency change and the per-channel L-inf bound allows saturated
+  # colour. `chroma_eps` clamps the Cb/Cr of the perturbation after every step (0 = luma only),
+  # `chroma_weight` penalises its mean chroma magnitude instead. T0 repeats the final mid mode so the
+  # new chroma columns have a same-GPU baseline.
+  "T0|mid||"
+  "T1|mid|--cloak-arg chroma_eps=4|"
+  "T2|mid|--cloak-arg chroma_eps=2|jpeg"
+  "T3|mid|--cloak-arg chroma_eps=0|jpeg"
+  "T4|mid|--cloak-arg chroma_weight=30|"
+  "T5|mid|--cloak-arg chroma_weight=100|"
+  "T6|mid|--cloak-arg chroma_eps=2 --cloak-arg eps=12|"
+  "T7|high|--cloak-arg chroma_eps=2|"
+  "T8|high|--cloak-arg chroma_eps=0|"
 )
 want=("$@")
 for cfg in "${CONFIGS[@]}"; do

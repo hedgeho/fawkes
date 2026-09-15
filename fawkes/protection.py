@@ -185,6 +185,11 @@ def main(*argv):
                         help='skip the blur/resize/JPEG robustness copies (faster, less robust)')
     parser.add_argument('--self-weight', type=float, default=None,
                         help="weight of the penalty on the face's remaining similarity to itself")
+    parser.add_argument('--chroma-eps', type=float, default=None,
+                        help="maximum Cb/Cr colour change of the cloak (0-255; 0 = luma only, default: unbounded); "
+                             "lower values remove the visible tint at some cost in strength")
+    parser.add_argument('--chroma-weight', type=float, default=None,
+                        help="penalty weight on the mean colour change of the cloak (default: 0)")
     parser.add_argument('--batch-size', type=int, default=8, help="number of faces optimised together")
     parser.add_argument('--threads', type=int, default=None, help='CPU threads for torch')
     parser.add_argument('--device', type=str, default=None,
@@ -209,7 +214,7 @@ def main(*argv):
                        steps=args.steps, eps=args.eps, dssim_budget=args.th,
                        eot_samples=0 if args.no_eot else None, threads=args.threads, seed=args.seed,
                        batch_size=args.batch_size, verbose=args.debug, device=args.device,
-                       self_weight=args.self_weight)
+                       self_weight=args.self_weight, chroma_eps=args.chroma_eps, chroma_weight=args.chroma_weight)
     status = protector.run_protection(image_paths, format=args.format, no_align=args.no_align, debug=args.debug)
     return 0 if status == 1 else status  # process exit code: 0 on success, 2 no face, 3 no image
 

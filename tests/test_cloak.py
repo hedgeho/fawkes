@@ -304,3 +304,59 @@ def test_grad_norm_matches_plain_gradient_for_one_surrogate():
     r1 = cloak.Cloaker(surrogates, cloak.CloakParams(**p)).cloak(crops, targets)
     r2 = cloak.Cloaker(surrogates, cloak.CloakParams(grad_norm=True, **p)).cloak(crops, targets)
     assert np.allclose(r1.images[0], r2.images[0])
+
+
+def _chroma(delta):
+    ycc = cloak.rgb_to_ycc(torch.from_numpy(np.ascontiguousarray(delta)).permute(2, 0, 1)[None])
+    return ycc[0, 1:].abs().max().item(), ycc[0, 1:].pow(2).sum(0).sqrt().mean().item()
+
+
+def test_ycc_round_trip_and_chroma_clamp():
+    d = torch.randn(2, 3, 16, 16) * 10
+    assert torch.allclose(cloak.ycc_to_rgb(cloak.rgb_to_ycc(d)), d, atol=1e-4)
+    c = cloak.clamp_chroma(d, 1.0)
+    ycc_before, ycc_after = cloak.rgb_to_ycc(d), cloak.rgb_to_ycc(c)
+    assert torch.allclose(ycc_before[:, 0], ycc_after[:, 0], atol=1e-4)  # luma untouched
+    assert float(ycc_after[:, 1:].abs().max()) <= 1.0 + 1e-4
+    grey = cloak.clamp_chroma(d, 0.0)
+    assert torch.allclose(grey[:, 0], grey[:, 1], atol=1e-4) and torch.allclose(grey[:, 1], grey[:, 2], atol=1e-4)
+    assert cloak.clamp_chroma(d, float("inf")) is d
+
+
+def test_chroma_bound_holds_and_cloak_still_moves_toward_target():
+    surrogates = {"a": DummySurrogate(1), "b": DummySurrogate(2)}
+    crops = _crops(2)
+    target_crop = align.make_crop(_face_photo(seed=9), BBOX, KPS)
+    common = dict(steps=30, lr=2.0, eps=10.0, dssim_budget=0.02, eot_samples=1, stop_cos=1.01, patience=30, batch_size=4)
+    cl_free = cloak.Cloaker(surrogates, cloak.CloakParams(**common))
+    targets = {k: v[0] for k, v in cl_free.embed([target_crop]).items()}
+    before = cl_free.embed(crops)
+    free = cl_free.cloak(crops, targets)
+    bounded = cloak.Cloaker(surrogates, cloak.CloakParams(chroma_eps=1.0, **common)).cloak(crops, targets)
+    grey = cloak.Cloaker(surrogates, cloak.CloakParams(chroma_eps=0.0, **common)).cloak(crops, targets)
+    for i, crop in enumerate(crops):
+        d_free = free.images[i] - crop.image
+        d_bound = bounded.images[i] - crop.image
+        d_grey = grey.images[i] - crop.image
+        # the RGB clamp after the chroma projection can add back a little chroma; the [0,255] image clamp too
+        assert _chroma(d_bound)[0] <= 1.0 + 0.5, _chroma(d_bound)
+        assert _chroma(d_bound)[1] < 0.5 * _chroma(d_free)[1], (_chroma(d_bound), _chroma(d_free))
+        assert _chroma(d_grey)[1] < 0.2, _chroma(d_grey)
+        assert np.abs(d_bound).max() <= 10.0 + 1e-3 and np.abs(d_grey).max() <= 10.0 + 1e-3
+        assert bounded.dssim[i] <= 0.02 * 1.05 + 1e-4
+    for j, k in enumerate(surrogates):
+        before_cos = (before[k] * targets[k][None]).sum(1)
+        assert (bounded.cos[:, j] > before_cos + 0.05).all(), (k, before_cos, bounded.cos[:, j])
+        assert (grey.cos[:, j] > before_cos + 0.03).all(), (k, before_cos, grey.cos[:, j])
+
+
+def test_chroma_penalty_lowers_chroma():
+    surrogates = {"a": DummySurrogate(1)}
+    crops = _crops(1)
+    targets = {k: v[0] for k, v in cloak.Cloaker(surrogates).embed(_crops(2)[1:]).items()}
+    common = dict(steps=30, lr=2.0, eps=10.0, dssim_budget=0.05, eot_samples=0, stop_cos=1.01, patience=30)
+    plain = cloak.Cloaker(surrogates, cloak.CloakParams(**common)).cloak(crops, targets)
+    penalised = cloak.Cloaker(surrogates, cloak.CloakParams(chroma_weight=100.0, **common)).cloak(crops, targets)
+    c_plain = _chroma(plain.images[0] - crops[0].image)[1]
+    c_pen = _chroma(penalised.images[0] - crops[0].image)[1]
+    assert c_pen < 0.7 * c_plain, (c_pen, c_plain)

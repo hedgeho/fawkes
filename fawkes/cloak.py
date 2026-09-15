@@ -37,6 +37,8 @@ class CloakParams:
     token_mask: float = 0.0  # >0: transformer surrogates drop this fraction of tokens on augmented steps
     delta_sigma: float = 0.0  # >0: the perturbation is a Gaussian-blurred (sigma px) image of the free variable
     grad_norm: bool = False  # rescale every surrogate's gradient to the ensemble's mean gradient norm
+    chroma_eps: float = math.inf  # L-inf bound on the Cb/Cr chroma of the perturbation, [0, 255] units; 0 = luma only
+    chroma_weight: float = 0.0  # >0: penalty weight on the mean Cb/Cr magnitude of the perturbation (as a fraction of 255)
     patience: int = 10  # stop a face when its clean loss has not improved for this many clean steps
     seed: int = 0
     batch_size: int = 8
@@ -106,6 +108,44 @@ def dssim(x, y, mask=None):
     m = mask[:, :, pad:-pad, pad:-pad].expand_as(s)
     s = (s * m).sum(dim=(1, 2, 3)) / m.sum(dim=(1, 2, 3)).clamp_min(1)
     return (1 - s) / 2
+
+
+def rgb_to_ycc(delta):
+    """Luma / chroma (Y, Cb, Cr) of a (N,3,H,W) RGB *difference*, JPEG (BT.601) matrix, no offsets."""
+    r, g, b = delta[:, 0], delta[:, 1], delta[:, 2]
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    cb = -0.168736 * r - 0.331264 * g + 0.5 * b
+    cr = 0.5 * r - 0.418688 * g - 0.081312 * b
+    return torch.stack([y, cb, cr], dim=1)
+
+
+def ycc_to_rgb(ycc):
+    y, cb, cr = ycc[:, 0], ycc[:, 1], ycc[:, 2]
+    r = y + 1.402 * cr
+    g = y - 0.344136 * cb - 0.714136 * cr
+    b = y + 1.772 * cb
+    return torch.stack([r, g, b], dim=1)
+
+
+def chroma_magnitude(delta):
+    """(N,H,W) magnitude of the Cb/Cr chroma of an RGB difference."""
+    ycc = rgb_to_ycc(delta)
+    return torch.sqrt(ycc[:, 1] ** 2 + ycc[:, 2] ** 2 + 1e-6)
+
+
+def clamp_chroma(delta, eps):
+    """Clamp the Cb and Cr components of an RGB difference to [-eps, eps], keeping its luma.
+
+    The visible part of a face cloak is smooth colour: SSIM barely responds to a low-frequency
+    change and the per-channel L-inf bound lets a patch go +eps red, -eps blue at once. Face
+    recognisers rely mostly on luma structure, so bounding the chroma separately removes most
+    of the tint at a small cost in attack strength. eps = 0 keeps a grey (luma-only) perturbation.
+    """
+    if not math.isfinite(eps):
+        return delta
+    ycc = rgb_to_ycc(delta)
+    ycc = torch.cat([ycc[:, :1], ycc[:, 1:].clamp(-eps, eps)], dim=1)
+    return ycc_to_rgb(ycc)
 
 
 # ----------------------------------------------------------------------------- EOT transforms
@@ -389,6 +429,9 @@ class Cloaker:
             feat_loss = terms.sum(dim=1)
             d = dssim(x, images, mask)
             penalty = p.dssim_weight * F.relu(d - p.dssim_budget)
+            if p.chroma_weight > 0:
+                chroma = (chroma_magnitude(x - images) * mask[:, 0]).sum(dim=(1, 2)) / mask[:, 0].sum(dim=(1, 2))
+                penalty = penalty + p.chroma_weight * chroma / 255.0
             act = active.float()
 
             opt.zero_grad()
@@ -401,6 +444,8 @@ class Cloaker:
                 delta.grad.mul_(_block_dropout_mask(delta.grad, p.patchout, rng))
             opt.step()
             with torch.no_grad():
+                if math.isfinite(p.chroma_eps):
+                    delta.copy_(clamp_chroma(delta, p.chroma_eps))
                 delta.clamp_(-p.eps, p.eps)
                 delta.mul_(mask)
                 steps_run[active] = step + 1

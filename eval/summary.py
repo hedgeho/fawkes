@@ -17,7 +17,8 @@ def row(path):
     overrides = " ".join(a.get("cloak_arg") or []) or "-"
     prot = " | ".join(f"{ev[k]['protection_rate']:.2f}" for k in ev)
     spp = q.get("seconds_per_photo")
-    return (f"| {label} | {a['mode']} | {overrides} | {prot} | {q['dssim_face']:.4f} | "
+    tint = " | ".join("-" if q.get(k) is None else f"{q[k]:.2f}" for k in ("chroma_lf_rms_face", "luma_lf_rms_face"))
+    return (f"| {label} | {a['mode']} | {overrides} | {prot} | {q['dssim_face']:.4f} | {tint} | "
             f"{'-' if spp is None else f'{spp:.1f}'} |"), list(ev)
 
 
@@ -28,8 +29,8 @@ def main(paths):
         line, evs = row(p)
         if header != evs:
             header = evs
-            print("| label | mode | overrides | " + " | ".join(evs) + " | DSSIM face | s/photo |")
-            print("|---" * (len(evs) + 5) + "|")
+            print("| label | mode | overrides | " + " | ".join(evs) + " | DSSIM face | chroma LF | luma LF | s/photo |")
+            print("|---" * (len(evs) + 7) + "|")
         print(line)
 
 
