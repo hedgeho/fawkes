@@ -95,6 +95,16 @@ CONFIGS=(
   "T13|high|--cloak-arg chroma_weight=30|jpeg"
   "T14|high|--cloak-arg chroma_weight=60|"
   "T15|mid|--cloak-arg chroma_weight=30 --cloak-arg eps=20|"
+  # Round 10: weight 20 is nearly free, weight 30 with the luma bound raised to 20 (T15) recovers all
+  # of the protection at half the chroma. Same-day high baseline, the eps=20 lever with other weights,
+  # in high mode, and under JPEG; T17 repeats T15 for a noise estimate.
+  "T16|high||"
+  "T17|mid|--cloak-arg chroma_weight=30 --cloak-arg eps=20|jpeg"
+  "T18|mid|--cloak-arg chroma_weight=40 --cloak-arg eps=20|"
+  "T19|mid|--cloak-arg chroma_weight=20 --cloak-arg eps=20|"
+  "T20|high|--cloak-arg chroma_weight=30 --cloak-arg eps=20|jpeg"
+  "T21|high|--cloak-arg chroma_weight=60 --cloak-arg eps=20|"
+  "T22|mid|--cloak-arg chroma_weight=30 --cloak-arg eps=24|"
 )
 want=("$@")
 for cfg in "${CONFIGS[@]}"; do
