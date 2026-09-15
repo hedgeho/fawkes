@@ -218,6 +218,23 @@ What round 10 says:
 - Weight 40 (T18) is already past the knee. The new defaults are weight 30 with eps 24 in `mid`
   and eps 20 in `high` (decision 12).
 
+## Final modes of 2026-09-15 (`eval/run_mode.sh`, colour penalty, decision 12)
+
+Same protocol. `mid`: chroma_weight 30, eps 24; `high`: chroma_weight 30, eps 20; `low` unchanged
+and not re-run. The mid run repeats T22 within 0.02 on every evaluator, the high run T20 within
+0.02 except antelopev2 (0.98 against 1.00). Cloaks computed on H100 (mid) and A100 (high) nodes.
+
+| mode | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | DSSIM face | chroma LF | luma LF | s/photo |
+|---|---|---|---|---|---|---|---|---|
+| mid | 0.86 | 0.94 | 0.46 | 0.94 | 0.013 | 0.94 | 1.59 | 1.3 |
+| mid, JPEG 75 | 0.82 | 0.88 | 0.38 | 0.92 | | | | |
+| high | 0.92 | 0.98 | 0.64 | 0.94 | 0.016 | 0.94 | 2.12 | 4.2 |
+| high, JPEG 75 | 0.90 | 0.96 | 0.64 | 0.94 | | | | |
+
+Against the 2026-09-13 modes (chroma LF 2.0 in mid, 2.4 in high): mid gains 0.02 to 0.06 on the
+ResNets and LVFace-T and is within noise on AdaFace ViT-B (0.46 against 0.48), losing 0.06 there
+under JPEG; high gains on the ResNets and loses 0.06 on AdaFace ViT-B, holding under JPEG.
+
 ## Final modes of 2026-09-13 (`eval/run_mode.sh`, five surrogates in mid and high)
 
 Same protocol; `low` is unchanged from 2026-09-12 (no transformer surrogate) and not re-run. The

@@ -126,17 +126,25 @@ deployments use (`buffalo_l`, a ResNet-50; `antelopev2`, a ResNet-100) and a vis
 | Fawkes 2, low | 0.74 | 0.90 | 0.20 | - | 0.012 | 35 (CPU), 1.1 (A100) |
 | Fawkes 2, low, JPEG 75 | 0.70 | 0.84 | 0.22 | - | 0.012 | - |
 | Fawkes 2, mid (three surrogates, 2026-09-12) | 0.74 | 0.84 | 0.32 | - | 0.012 | 56 (CPU), 1.0 (A100) |
-| Fawkes 2, mid | 0.80 | 0.92 | 0.48 | 0.90 | 0.013 | 74 (CPU), 1.7 (A100) |
-| Fawkes 2, mid, JPEG 75 | 0.74 | 0.84 | 0.44 | 0.92 | 0.013 | - |
+| Fawkes 2, mid (no colour penalty, 2026-09-13) | 0.80 | 0.92 | 0.48 | 0.90 | 0.013 | 74 (CPU), 1.7 (A100) |
+| Fawkes 2, mid (no colour penalty), JPEG 75 | 0.74 | 0.84 | 0.44 | 0.92 | 0.013 | - |
+| Fawkes 2, mid | 0.86 | 0.94 | 0.46 | 0.94 | 0.013 | 78 (CPU), 1.3 (H100) |
+| Fawkes 2, mid, JPEG 75 | 0.82 | 0.88 | 0.38 | 0.92 | 0.013 | - |
 | Fawkes 2, high (three surrogates, 2026-09-12) | 0.82 | 0.92 | 0.52 | 0.78 | 0.017 | about 190 (CPU), 2.8 (A100) |
-| Fawkes 2, high | 0.86 | 0.92 | 0.70 | 0.96 | 0.016 | about 250 (CPU, estimated), 4.4 (A100) |
-| Fawkes 2, high, JPEG 75 | 0.86 | 0.90 | 0.68 | 0.96 | 0.016 | - |
+| Fawkes 2, high (no colour penalty, 2026-09-13) | 0.86 | 0.92 | 0.70 | 0.96 | 0.016 | about 250 (CPU, estimated), 4.4 (A100) |
+| Fawkes 2, high (no colour penalty), JPEG 75 | 0.86 | 0.90 | 0.68 | 0.96 | 0.016 | - |
+| Fawkes 2, high | 0.92 | 0.98 | 0.64 | 0.94 | 0.016 | about 250 (CPU, estimated), 4.2 (A100) |
+| Fawkes 2, high, JPEG 75 | 0.90 | 0.96 | 0.64 | 0.94 | 0.016 | - |
 
 The original cloaks move the embeddings a little but every protected identity is still recognised.
 Fawkes 2 defeats the classifier for most identities on the ResNet recognisers and, since the
 ensemble gained two more transformers (`mid` and `high`), for two thirds of them on the
 transformer evaluator; a fourth evaluator, LVFace-T, is a transformer from the same family as
-three of the surrogates and is a weaker test.
+three of the surrogates and is a weaker test. The current modes also penalise the colour of the
+cloak (decision 12): the smooth reddish and yellowish patches the earlier cloaks left on the skin
+are halved (the low-passed chroma of the change inside the face box goes from 2.0 to 0.9 grey
+levels) at equal or better protection, except for a few points on the transformer evaluator in
+`high` and under JPEG in `mid`.
 Under 1:1 verification with the usual 0.3 cosine threshold, every cloaked photo in `mid` and
 `high` fails to match its own identity on all three evaluators. The table is for an adversary that
 trains on the cloaked photos and meets clean ones; with the sides swapped (`--clean-gallery`: the

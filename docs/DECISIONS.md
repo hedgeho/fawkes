@@ -230,7 +230,12 @@ chroma of the old one and 0.88 / 0.96 / 0.48 / 0.94 against 0.80 / 0.90 / 0.48 /
 1.00 / 0.62 / 0.98 against 0.90 / 0.94 / 0.70 / 0.96, holding under JPEG 75. The DSSIM budget,
 not the pixel bound, was limiting the luma; the penalty moves the budget from colour to
 luminance detail, which the recognisers use and a viewer tolerates far better. A repeat of one
-configuration on another GPU allocation agrees within 0.04, the noise of these numbers.
+configuration on another GPU allocation agrees within 0.04, the noise of these numbers. The
+final-mode runs with these defaults give 0.86 / 0.94 / 0.46 / 0.94 in `mid` (0.82 / 0.88 /
+0.38 / 0.92 under JPEG 75) and 0.92 / 0.98 / 0.64 / 0.94 in `high` (0.90 / 0.96 / 0.64 / 0.94
+under JPEG 75). On the author's own photos the low-passed chroma of the change drops from 1.9
+to 0.9 and from 1.3 to 0.7 grey levels; what remains visible is luma contouring around the eyes
+and nose, which is the attack itself.
 
 **What was tried and rejected.** Hard chroma bounds of 4, 2 and 0 (rounds 8); weight 50 and above
 (the transformer collapses); weight 30 with more steps (no gain); weight 60 in `high` (80 percent
