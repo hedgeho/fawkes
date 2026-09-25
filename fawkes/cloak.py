@@ -46,6 +46,7 @@ class CloakParams:
     lpips_budget: float = 0.0
     age_weight: float = 0.0  # >0: penalty per decade of apparent age (insightface genderage) added beyond `age_margin`
     age_margin: float = 1.0  # years of apparent ageing allowed for free
+    age_symmetric: bool = False  # penalise rejuvenation beyond the margin too, not only ageing
     flow_eps: float = 0.0  # >0: add a smooth sub-pixel displacement field bounded to this many crop pixels
     flow_lr: float = 0.05  # Adam step of the displacement field, crop pixels
     patience: int = 10  # stop a face when its clean loss has not improved for this many clean steps
@@ -572,7 +573,9 @@ class Cloaker:
                 penalty = penalty + p.shade_weight * shade / 255.0
             lp = None
             if age_fn is not None:
-                penalty = penalty + p.age_weight * F.relu(age_fn(x, age_m) - clean_age - p.age_margin) / 10.0
+                shift = age_fn(x, age_m) - clean_age
+                shift = shift.abs() if p.age_symmetric else shift
+                penalty = penalty + p.age_weight * F.relu(shift - p.age_margin) / 10.0
             if lp_net is not None:
                 lp = lpips_distance(lp_net, x, images)
                 penalty = penalty + p.lpips_weight * F.relu(lp - p.lpips_budget)

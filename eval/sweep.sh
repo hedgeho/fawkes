@@ -131,6 +131,16 @@ CONFIGS=(
   "S15|mid|--cloak-arg age_weight=10 --target-strategy near|"
   "S16|high|--cloak-arg age_weight=3 --target-strategy near|jpeg"
   "S17|high|--target-strategy near|"
+  # Round 13: the far matched target (round 11: 0.98 / 0.98 / 0.74 / 0.98 in mid) still reads as ageing on
+  # real photos; with the age penalty it does not. In mid the penalty costs 0.2-0.3 at 60 steps but is
+  # nearly free in high (200 steps): far + age penalty with more steps, more budget, a symmetric hinge.
+  "R0|mid|--target-strategy far --cloak-arg age_weight=1|"
+  "R1|mid|--target-strategy far --cloak-arg age_weight=3|"
+  "R2|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg age_symmetric=1|"
+  "R3|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99|"
+  "R4|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg age_symmetric=1|"
+  "R5|high|--target-strategy far --cloak-arg age_weight=3|jpeg"
+  "R6|high|--target-strategy far --cloak-arg age_weight=10 --cloak-arg age_symmetric=1|"
 )
 want=("$@")
 # SWEEP_STAGE=all (default): cloak and evaluate each configuration in one job, sharing $WORK.
