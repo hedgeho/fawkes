@@ -158,6 +158,14 @@ CONFIGS=(
   "L2|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg dssim_budget=0.006 --cloak-arg eps=12|"
   "L3|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg dssim_budget=0.004 --cloak-arg eps=8|"
   "L4|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg dssim_budget=0.003 --cloak-arg eps=6|"
+  # Round 16: the author picks L2 as the strongest invisible rung, but L1-L4 protect nothing and use
+  # half their budget; at this strength the age penalty may only hold the attack back. L2's budget
+  # without it or lighter, near against far, 60 against 120 steps, and L1's budget without it.
+  "M1|mid|--target-strategy far --cloak-arg dssim_budget=0.006 --cloak-arg eps=12|"
+  "M2|mid|--target-strategy far --cloak-arg dssim_budget=0.006 --cloak-arg eps=12 --cloak-arg steps=120 --cloak-arg stop_cos=0.99|"
+  "M3|mid|--target-strategy near --cloak-arg dssim_budget=0.006 --cloak-arg eps=12 --cloak-arg steps=120 --cloak-arg stop_cos=0.99|"
+  "M4|mid|--target-strategy far --cloak-arg dssim_budget=0.006 --cloak-arg eps=12 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg age_weight=1|"
+  "M5|mid|--target-strategy far --cloak-arg dssim_budget=0.008 --cloak-arg eps=16 --cloak-arg steps=120 --cloak-arg stop_cos=0.99|"
 )
 want=("$@")
 # SWEEP_STAGE=all (default): cloak and evaluate each configuration in one job, sharing $WORK.
