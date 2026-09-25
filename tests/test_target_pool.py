@@ -76,3 +76,14 @@ def test_skin_lab_on_uniform_face():
     kps = np.array([[70, 90], [130, 90], [100, 120], [75, 150], [125, 150]], np.float32)
     lab = tp.skin_lab(img, kps)
     assert 60 < lab[0] < 75 and lab[1] > 5 and lab[2] > 10
+
+
+def test_assignments_remember_a_person(tmp_path):
+    a = tp.Assignments(tmp_path / "a.json")
+    me = _unit([1, 0.1, 0, 0])
+    assert a.lookup("k", me) is None
+    a.add("k", me, "p3")
+    again = tp.Assignments(tmp_path / "a.json")
+    assert again.lookup("k", _unit([1, 0.2, 0, 0])) == "p3"
+    assert again.lookup("k", _unit([0, 1, 0, 0])) is None
+    assert again.lookup("other", me) is None

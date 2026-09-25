@@ -66,7 +66,7 @@ def main(argv=None):
             paths.append(dst)
         strategy = overrides.pop("target", None)
         protector = Fawkes(mode=mode, target_dir=None if strategy else args.target_dir,
-                           target_strategy=strategy or "near", batch_size=8, **overrides)
+                           target_strategy=strategy or "far", remember_targets=False, batch_size=8, **overrides)
         print(f"=== {label}: mode {mode} {overrides} target {strategy or args.target_dir}")
         protector.run_protection(paths)
         pairs = [(p, os.path.splitext(p)[0] + "_cloaked.png") for p in paths]

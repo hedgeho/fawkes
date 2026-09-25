@@ -210,6 +210,36 @@ def select(pool, person, keys, strategy="near", exclude=(), max_cos=0.2, age_tol
     return i, reason
 
 
+ASSIGNMENTS_FILE = "target_pool/assignments.json"
+
+
+class Assignments:
+    """Remembers which pool target each person got, so later batches of photos of the same person are
+    pushed toward the same target (a recogniser must see one consistent false identity). A person is
+    recognised by the cosine of their centroid under one surrogate (SAME_PERSON)."""
+
+    def __init__(self, path=None):
+        from fawkes.models import model_dir
+        import json
+        self.path = Path(path or model_dir() / ASSIGNMENTS_FILE)
+        self.entries = json.loads(self.path.read_text()) if self.path.exists() else []
+
+    def lookup(self, key, centroid, threshold=SAME_PERSON):
+        best, name = threshold, None
+        for e in self.entries:
+            if e["key"] == key:
+                c = float(np.dot(e["centroid"], centroid))
+                if c >= best:
+                    best, name = c, e["target"]
+        return name
+
+    def add(self, key, centroid, target):
+        import json
+        self.entries.append({"key": key, "centroid": [float(v) for v in centroid], "target": target})
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(self.entries))
+
+
 def build(keys, device=None, min_photos=5, max_photos=8, lfw_dir=None, verbose=True):
     """Describe every LFW identity with at least `min_photos` single-face photos (using at most
     `max_photos` of them) under the surrogates `keys`."""

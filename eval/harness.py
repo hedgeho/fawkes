@@ -206,6 +206,7 @@ def cloak_v2(paths, args, target_dirs):
             by_identity.setdefault(os.path.basename(os.path.dirname(os.path.dirname(p))), []).append(p)
         protector = Fawkes(mode=args.mode, target_dir=None, batch_size=args.batch_size,
                            target_strategy=args.target_strategy, target_exclude=args.harness_identities,
+                           remember_targets=False,
                            **parse_cloak_args(args.cloak_arg))
         for ident, group in by_identity.items():
             n_before = len(protector.chosen_targets)

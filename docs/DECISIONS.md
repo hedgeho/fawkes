@@ -251,6 +251,58 @@ the darker contouring around the eyes and nose that the transfer to 112-pixel mo
 Choosing a target with a similar skin tone to the user's would reduce the pressure toward colour
 in the first place and is worth a check for the target advice.
 
+## 13. A matched automatic target, an age penalty, and a subtle mode
+
+**Decision.** Without `--target-dir` the target is chosen from a pool of 420 LFW identities
+(`fawkes/target_pool.py`): same apparent sex, similar age and skin tone, and among those the least
+similar face (`far`); a person keeps their target across runs. Every mode but `low` penalises the
+apparent ageing of the face, with insightface's genderage estimator run as a differentiable torch
+module inside the loss (`age_weight`: 1 in `subtle`, 2 in `mid`, 3 in `high`). `mid` runs 120 steps.
+A new mode, `subtle` (DSSIM budget 0.006, pixel bound 12), is the strength for photos meant to be
+posted. Dated 2026-09-25.
+
+**Evidence.** On the author's photos the decision-12 cloaks, with Obama as target, made people look
+older: they draw nasolabial folds, lines under the eyes and cheekbone shading. genderage puts the
+shift at +10 years in `mid` and up to +33 in `high` (29 to 62). Rounds 11 to 16 in
+`eval/RESULTS.md` tried the levers one at a time, judging looks on real photos
+(`eval/showcase.py`) and protection on the LFW harness.
+
+- A matched target helps protection by itself: at the mid budget *far* gives 0.98 / 0.98 / 0.74 /
+  0.98 against 0.82 / 0.92 / 0.44 / 0.92 for a random target. Attributes the target does not share
+  cost budget without changing identity. On its own it still draws age.
+- Only the age penalty removes the folds. LPIPS in the loss, a texture-masked pixel bound and a
+  penalty on dark wrinkle-scale lines leave them, and LPIPS costs the transformer 0.12 to 0.20. A
+  sub-pixel warp raises transfer but shows. The penalty needs steps: at 60 it costs 0.2 to 0.3, at
+  120 (`mid`, Q3) the result is 0.88 / 0.88 / 0.70 / 0.86, and in 200-step `high` it is free
+  (0.96 / 0.96 / 0.78 / 0.98, the same under JPEG 75).
+- The hinge must be one-sided: penalising a younger reading as well leaves the optimiser no
+  direction and protection drops to zero.
+- The author still saw the mid-budget cloaks. A ladder of budgets found the strongest invisible
+  rung at DSSIM 0.006 and pixel bound 12, where age weight 3 protects nothing, because it holds the
+  attack below half its budget. Weight 1 at that budget (M4) protects 0.60 / 0.66 / 0.22 / 0.58 and
+  looks mild; without the penalty (M2) protection is 0.72 / 0.80 / 0.26 / 0.72, but the folds come
+  back. That is `subtle`.
+
+**What this says about the problem.** The recognisers see a face at 112 by 112 pixels, so any change
+they register is, on a phone photo, a smooth change of shading across the face; noise finer than that
+is removed by their own resize. Visibility and protection are one quantity here. The age penalty
+changes what the shading looks like (neutral instead of old), the matched target reduces how much is
+needed, and the rest is a choice of strength, which is what the modes are.
+
+**What was tried and rejected.** LPIPS penalty (weights 5, 20), texture-masked bound (floors 0.5,
+0.25), dark-line penalty (weights 30, 100), sub-pixel warp (1 px), the symmetric age hinge, age
+weight 10 in `mid` (no protection), and pushing the apparent age younger (`age_margin` -3).
+
+**Caveats.** The age penalty and the age column use the same estimator, so the column is not
+evidence of a younger look (it reads 10 to 17 years younger); the evidence is the sheets. The pool
+is LFW, mostly middle-aged men; for others the best skin or age match is sometimes poor (skin
+delta E 30 for one face in the author's photos). The `subtle` and `mid` numbers are single runs
+(noise about 0.06) and have no JPEG measurement; `mid` at age weight 3 with 150 steps (Q2) lost
+0.00 to 0.04 under JPEG 75.
+
+**Would change it.** A second, held-out age estimator to judge ageing; a larger and more diverse
+target pool; a user study at feed size in place of one person's eyes.
+
 ## Known limits, stated plainly
 
 - No cloak can defend against a model trained adaptively after the cloaked photos are public

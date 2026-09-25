@@ -283,6 +283,50 @@ What rounds 11 to 13 say:
   estimator reads 12 to 17 years younger), so the age column is not evidence of a younger look.
   The sheets are the evidence.
 
+## Rounds 14 to 16 (2026-09-25): age penalty against steps, and a strength ladder
+
+Showcase 3 on the author's photos: far + age 1 still draws folds, far + age 3 with 120 steps looks
+clean but loses 0.14 on two ResNets, and `high` with age 3 keeps faint lines. Round 14 maps age
+weight against steps. The author still saw all of these, so round 15 is a ladder of smaller budgets
+with the far + age 3 + 120-step recipe (L0 = R3 above), judged on the photos at feed size
+(`eval/showcase.py` now writes 1080-pixel JPEGs as well). The author picked L2 as the strongest rung
+he could not see. Round 16 asks what protects at L2's budget.
+
+| label | base | changes | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | DSSIM face |
+|---|---|---|---|---|---|---|---|
+| Q0 | mid | far, age 2, 90 steps, stop 0.99 | 0.86 | 0.88 | 0.66 | 0.82 | 0.012 |
+| Q1 | mid | far, age 3, 90 steps | 0.76 | 0.78 | 0.58 | 0.76 | 0.012 |
+| Q3 | mid | far, age 2, 120 steps | 0.88 | 0.88 | 0.70 | 0.86 | 0.013 |
+| Q2 | mid | far, age 3, 150 steps | 0.76 | 0.78 | 0.64 | 0.78 | 0.012 |
+| Q2 jpeg | | JPEG 75 | 0.76 | 0.78 | 0.60 | 0.78 | |
+| Q4 | mid | far, age 3, 120 steps, budget 0.015 | 0.88 | 0.88 | 0.72 | 0.88 | 0.015 |
+| Q5 | high | far, age 6 | 0.86 | 0.90 | 0.76 | 0.88 | 0.016 |
+| Q5 jpeg | | JPEG 75 | 0.86 | 0.90 | 0.72 | 0.86 | |
+| Q6 | high | far, age 10 | 0.88 | 0.88 | 0.68 | 0.90 | 0.016 |
+| L1 | mid | far, age 3, 120 steps, budget 0.008, eps 16 | 0.08 | 0.14 | 0.02 | 0.08 | 0.006 |
+| L2 | mid | ... budget 0.006, eps 12 | 0.00 | 0.00 | 0.00 | 0.00 | 0.003 |
+| L3 | mid | ... budget 0.004, eps 8 | 0.00 | 0.00 | 0.00 | 0.00 | 0.001 |
+| L4 | mid | ... budget 0.003, eps 6 | 0.00 | 0.00 | 0.00 | 0.00 | 0.001 |
+| M1 | mid | far, budget 0.006, eps 12, no age penalty, 60 steps | 0.74 | 0.78 | 0.26 | 0.74 | 0.007 |
+| M2 | mid | far, budget 0.006, eps 12, no age penalty, 120 steps | 0.72 | 0.80 | 0.26 | 0.72 | 0.007 |
+| M3 | mid | M2 with the near target | 0.54 | 0.62 | 0.16 | 0.60 | 0.007 |
+| M4 | mid | M2 with age 1 (**subtle**) | 0.60 | 0.66 | 0.22 | 0.58 | 0.007 |
+| M5 | mid | far, budget 0.008, eps 16, no age penalty, 120 steps | 0.94 | 0.96 | 0.50 | 0.90 | 0.009 |
+
+What rounds 14 to 16 say:
+
+- At the mid budget age weight 2 with 120 steps (Q3) is the best trade: within 0.06 of the 09-15
+  mid on the ResNets and 0.26 better on the transformer. More weight or steps do not pay; more
+  budget (Q4) buys 0.02. In `high` weights 6 and 10 cost 0.1 on the ResNets over weight 3 (R5) and
+  do not look different, so `high` keeps weight 3.
+- Protection falls off a cliff below the mid budget with age weight 3. The ladder rungs stop at
+  half their DSSIM budget: the age penalty holds the attack back once the budget is tight.
+- Without the penalty the L2 budget protects (M1, M2: about 0.75 on the ResNets), but on the
+  photos the folds return. Weight 1 (M4) is between the two on both counts and became `subtle`. The
+  far target beats the near one here too (M2 against M3).
+- M5 (L1's budget without the penalty) protects better than the 09-15 mid at 70 percent of its
+  DSSIM. It shows the same kind of change as `mid`, so it is not a mode.
+
 ## Final modes of 2026-09-15 (`eval/run_mode.sh`, colour penalty, decision 12)
 
 Same protocol. `mid`: chroma_weight 30, eps 24; `high`: chroma_weight 30, eps 20; `low` unchanged

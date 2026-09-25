@@ -38,31 +38,43 @@ Usage
 -----
 
 ```
-fawkes -d ./imgs --target-dir ./target --mode mid
+fawkes -d ./imgs --mode subtle
 ```
 
-or `python3 -m fawkes -d ./imgs -t ./target -m mid`.
+or `python3 -m fawkes -d ./imgs -m subtle`. Without `--target-dir` Fawkes picks the target for you
+(see [Choosing a target](#choosing-a-target)); that needs the target pool, built once with
+`python -m fawkes.target_pool build` (requires the `eval` extra for LFW).
 
 Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
 
 * `-d`, `--directory`: the directory with images to protect.
 * `-t`, `--target-dir`: a directory with a few photos of the person your cloaked photos should
-  resemble to a recogniser. See [Choosing a target](#choosing-a-target).
-* `-m`, `--mode`: `low`, `mid` (default) or `high`, the tradeoff between protection strength,
-  visible change and run time:
+  resemble to a recogniser (default: picked automatically). See [Choosing a target](#choosing-a-target).
+* `--target-strategy`: `far` (default) or `near`, which of the matched pool identities the automatic
+  target is.
+* `-m`, `--mode`: `low`, `subtle`, `mid` (default) or `high`, the tradeoff between protection
+  strength, visible change and run time:
 
-  | mode | surrogates | steps | max pixel change | DSSIM budget | colour penalty | robustness views | s / face, 8-core CPU |
+  | mode | surrogates | steps | max pixel change | DSSIM budget | colour penalty | age penalty | s / face, GPU |
   |---|---|---|---|---|---|---|---|
-  | low | AdaFace IR-101, ArcFace IR-100 | 60 | 16 | 0.012 | - | blur, resize, JPEG | 35 |
-  | mid | + LVFace-B, LVFace-L, LVFace-S (transformers) | 60 | 24 | 0.012 | 30 | blur, resize, JPEG | 74 |
-  | high | same five | 200 | 20 | 0.017 | 30 | blur, resize, JPEG | about 250 (estimated) |
+  | low | AdaFace IR-101, ArcFace IR-100 | 60 | 16 | 0.012 | - | - | 0.6 |
+  | subtle | + LVFace-B, LVFace-L, LVFace-S (transformers) | 120 | 12 | 0.006 | 30 | 1 | 2.7 |
+  | mid | same five | 120 | 24 | 0.012 | 30 | 2 | 3.3 |
+  | high | same five | 200 | 20 | 0.017 | 30 | 3 | 8.3 |
+
+  `subtle` is for photos you want to post: at feed size the change is hard to see, and it protects
+  less (see [Evaluation](#evaluation)). `mid` and `high` protect more and are visible as a slight
+  change of the face's shading. On an 8-core CPU without a GPU, `low` takes about 35 s per face; the
+  other modes take several minutes (not measured since the step counts were raised).
 
   Every mode also penalises what is left of your own identity in the cloaked face
   (`--self-weight`, see [docs/DECISIONS.md](docs/DECISIONS.md#10-penalise-the-residual-similarity-to-the-own-face-not-only-the-distance-to-the-target)).
   `mid` and `high` penalise the colour part of the cloak, which is what shows as reddish or
   yellowish patches on the skin, and spend the DSSIM budget on luma detail instead
   (`--chroma-weight`, [decision 12](docs/DECISIONS.md#12-penalise-the-colour-of-the-cloak-and-raise-the-luma-bound)).
-  On a CUDA GPU all modes take a second or two per face.
+  All but `low` also penalise the apparent ageing of the face: without it the cloak draws folds and
+  lines under the eyes that make people look years older (`--age-weight`,
+  [decision 13](docs/DECISIONS.md#13-a-matched-automatic-target-an-age-penalty-and-a-subtle-mode)).
 
 * `--models`: comma-separated surrogate keys overriding the mode (`python -m fawkes.models list`).
 * `--steps`, `--eps`, `--th`, `--no-eot`, `--self-weight`: override the mode's steps, pixel bound,
@@ -79,14 +91,24 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
 
 ### Choosing a target
 
-A recogniser trained on your cloaked photos should learn the target's face, not yours. All of your
-photos are pushed toward the same target, so use the same `--target-dir` every time; the target
-embedding is cached in `<target-dir>/fawkes_target.npz` after the first run.
+A recogniser trained on your cloaked photos should learn the target's face, not yours.
+
+**Automatic (default).** Fawkes groups the faces in your photos into people and picks a target for
+each from a pool of about 420 public identities (LFW): the same apparent sex, a similar age and skin
+tone, and, among those, the face least like yours (`--target-strategy far`). Differences in age, sex
+or skin tone cost budget without changing identity: they are what made earlier cloaks look older or
+tinted. A matched target also protects better (rounds 11 to 16 in [eval/RESULTS.md](eval/RESULTS.md)).
+A person Fawkes has cloaked before keeps their target in later runs, so every photo of you pushes
+toward the same false identity (remembered in `fawkes/model/target_pool/assignments.json`; delete it
+to start over).
+
+**Your own target** (`--target-dir`). All of your photos are pushed toward the same target, so use
+the same directory every time; the embedding is cached in `<target-dir>/fawkes_target.npz`.
 
 - Use 3 to 10 photos of one person, each with exactly one clearly visible face. Photos with zero or
   several faces are skipped.
-- Pick someone who looks unlike you: a different sex, age or ethnicity moves your embedding
-  further. Fawkes warns when your faces already resemble the target under one of its models.
+- Pick someone of your sex and roughly your age and skin tone who otherwise looks unlike you; a
+  target much older than you makes the cloak draw age.
 - Public figures work fine; their real photos are labelled as them, not as you.
 
 ### Tips
@@ -135,6 +157,10 @@ deployments use (`buffalo_l`, a ResNet-50; `antelopev2`, a ResNet-100) and a vis
 | Fawkes 2, high (no colour penalty), JPEG 75 | 0.86 | 0.90 | 0.68 | 0.96 | 0.016 | - |
 | Fawkes 2, high | 0.92 | 0.98 | 0.64 | 0.94 | 0.016 | about 250 (CPU, estimated), 4.2 (A100) |
 | Fawkes 2, high, JPEG 75 | 0.90 | 0.96 | 0.64 | 0.94 | 0.016 | - |
+| Fawkes 2 (2026-09-25), subtle, automatic target | 0.60 | 0.66 | 0.22 | 0.58 | 0.007 | 2.7 (GPU) |
+| Fawkes 2 (2026-09-25), mid, automatic target | 0.88 | 0.88 | 0.70 | 0.86 | 0.013 | 3.3 (GPU) |
+| Fawkes 2 (2026-09-25), high, automatic target | 0.96 | 0.96 | 0.78 | 0.98 | 0.017 | 8.3 (GPU) |
+| Fawkes 2 (2026-09-25), high, automatic target, JPEG 75 | 0.94 | 0.96 | 0.78 | 0.98 | 0.017 | - |
 
 The original cloaks move the embeddings a little but every protected identity is still recognised.
 Fawkes 2 defeats the classifier for most identities on the ResNet recognisers and, since the
@@ -145,6 +171,11 @@ cloak (decision 12): the smooth reddish and yellowish patches the earlier cloaks
 are halved (the low-passed chroma of the change inside the face box goes from 2.0 to 0.9 grey
 levels) at equal or better protection, except for a few points on the transformer evaluator in
 `high` and under JPEG in `mid`.
+The 2026-09-25 modes (decision 13) add the matched automatic target and the age penalty; the rows are
+the sweep configurations that became the modes (R5, Q3, M4 in eval/RESULTS.md), with the
+automatic target instead of the harness's random one. The earlier rows cloak toward a random LFW
+identity. `subtle` is the price of a cloak that is hard to see: on the author's photos every setting
+that protected more than it also showed, and the strength at which nothing showed protected nothing.
 Under 1:1 verification with the usual 0.3 cosine threshold, every cloaked photo in `mid` and
 `high` fails to match its own identity on all three evaluators. The table is for an adversary that
 trains on the cloaked photos and meets clean ones; with the sides swapped (`--clean-gallery`: the
