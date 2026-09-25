@@ -218,6 +218,71 @@ What round 10 says:
 - Weight 40 (T18) is already past the knee. The new defaults are weight 30 with eps 24 in `mid`
   and eps 20 in `high` (decision 12).
 
+## Rounds 11 to 13 (2026-09-25): cloaks that do not age the face
+
+On the author's high-resolution photos the decision-12 cloaks read as ageing: they draw nasolabial
+folds, lines under the eyes and cheekbone shading. insightface's genderage estimator agrees. On five
+real photos with Obama as target the apparent age rises by 9.8 years in `mid` and by up to 33 years
+in the 09-15 `high` (29 to 62). On the 250-pixel LFW photos the same measure is noise (mean
+within ±1 year, p90 5 to 7), so the visual judgement comes from `eval/showcase.py` sheets of real
+photos, and the harness supplies the protection numbers.
+
+New columns: *LPIPS* (AlexNet, face box) and *age shift* (genderage, cloaked minus clean, years;
+not held out once `age_weight` is on). Targets: *random* is the harness protocol, a random LFW
+identity; *near* / *far* is the new automatic target, a pool identity of the same apparent sex,
+similar age and skin tone, the most or least similar in feature space
+(`fawkes/target_pool.py`). The evaluation ran on CPU nodes from the cloaks (`SWEEP_STAGE`).
+
+| label | base | changes | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | DSSIM face | LPIPS | age shift |
+|---|---|---|---|---|---|---|---|---|---|
+| S0 | mid | (final mid of 2026-09-15) | 0.82 | 0.92 | 0.44 | 0.92 | 0.013 | 0.021 | -0.7 |
+| S1 | mid | target near | 0.96 | 0.98 | 0.42 | 0.92 | 0.012 | 0.021 | -0.1 |
+| S2 | mid | target far | 0.98 | 0.98 | 0.74 | 0.98 | 0.012 | 0.021 | -0.8 |
+| S3 | mid | lpips_weight 5 | 0.84 | 0.94 | 0.32 | 0.92 | 0.013 | 0.014 | -0.7 |
+| S4 | mid | lpips_weight 20 | 0.78 | 0.92 | 0.24 | 0.92 | 0.013 | 0.010 | -0.8 |
+| S5 | mid | eps_floor 0.5 (texture-masked bound) | 0.86 | 0.94 | 0.42 | 0.94 | 0.012 | 0.021 | -0.7 |
+| S6 | mid | eps_floor 0.25 | 0.86 | 0.92 | 0.42 | 0.94 | 0.012 | 0.021 | -0.7 |
+| S7 | mid | shade_weight 30 (dark wrinkle-scale lines) | 0.84 | 0.94 | 0.44 | 0.94 | 0.012 | 0.021 | -1.1 |
+| S8 | mid | shade_weight 100 | 0.84 | 0.92 | 0.36 | 0.92 | 0.012 | 0.021 | -1.0 |
+| S9 | mid | flow_eps 1 (sub-pixel warp) | 0.90 | 0.98 | 0.64 | 1.00 | 0.033 | 0.032 | -1.3 |
+| S10 | mid | flow_eps 1, eps 16 | 0.88 | 0.96 | 0.54 | 0.98 | 0.033 | 0.032 | -0.9 |
+| S11 | mid | age_weight 1 | 0.80 | 0.88 | 0.28 | 0.92 | 0.012 | 0.02 | -14.9 |
+| S12 | mid | age_weight 3 | 0.54 | 0.64 | 0.16 | 0.66 | 0.012 | 0.02 | -17.2 |
+| S13 | mid | age_weight 3, target near | 0.62 | 0.68 | 0.28 | 0.56 | 0.012 | 0.02 | -15.4 |
+| S13 jpeg | | JPEG 75 | 0.54 | 0.66 | 0.30 | 0.54 | | | |
+| S14 | mid | age_weight 3, age_margin -3, target near | 0.52 | 0.56 | 0.22 | 0.48 | 0.012 | 0.03 | -17.9 |
+| S15 | mid | age_weight 10, target near | 0.00 | 0.00 | 0.00 | 0.00 | 0.005 | 0.02 | -12.6 |
+| R0 | mid | age_weight 1, target far | 0.92 | 0.96 | 0.62 | 0.90 | 0.012 | 0.02 | -13.5 |
+| R1 | mid | age_weight 3, target far | 0.76 | 0.78 | 0.38 | 0.76 | 0.011 | 0.02 | -16.6 |
+| R2 | mid | age_weight 3 symmetric, target far | 0.00 | 0.00 | 0.00 | 0.00 | 0.007 | 0.03 | -1.6 |
+| R3 | mid | age_weight 3, target far, 120 steps, stop 0.99 | 0.76 | 0.78 | 0.66 | 0.78 | 0.012 | 0.02 | -13.8 |
+| R4 | mid | R3 with the symmetric hinge | 0.00 | 0.00 | 0.00 | 0.00 | 0.006 | 0.02 | -2.1 |
+| S17 | high | target near | 0.98 | 0.98 | 0.62 | 0.96 | 0.017 | 0.02 | 1.4 |
+| S16 | high | age_weight 3, target near | 0.98 | 0.98 | 0.58 | 0.94 | 0.017 | 0.02 | -11.9 |
+| S16 jpeg | | JPEG 75 | 0.96 | 0.94 | 0.54 | 0.94 | | | |
+| R5 | high | age_weight 3, target far | 0.96 | 0.96 | 0.78 | 0.98 | 0.017 | 0.02 | -12.5 |
+| R5 jpeg | | JPEG 75 | 0.94 | 0.96 | 0.78 | 0.98 | | | |
+
+What rounds 11 to 13 say:
+
+- **The target matters more than anything tried on the image side.** A matched target (same sex,
+  similar age and skin tone) raises protection at the same budget: *near* by 0.06 to 0.14 on the
+  ResNets, *far* on every evaluator, AdaFace ViT-B from 0.44 to 0.74. The attributes a random
+  target differs in cost budget without buying identity change. Visually the matched target alone
+  still ages the face (apparent age +5 to +6 years on the real photos instead of +10).
+- **Only the age penalty removes the ageing.** LPIPS, the texture-masked bound and the penalty on
+  dark wrinkle-scale lines leave the folds on the real photos, and LPIPS costs the transformer
+  0.12 to 0.20. The sub-pixel warp adds transfer, but DSSIM rises to 0.033 because the warp sits
+  outside the pixel budget, and it shows. With `age_weight` 3 the sheets look close to clean.
+- **The age penalty costs steps, not budget.** In 60-step `mid` it costs 0.2 to 0.3 per evaluator
+  (S12, R1); in 200-step `high` it is within noise (S16 against S17). On the far target, weight 1
+  in `mid` (R0) is still better than the 09-15 mid on three evaluators.
+- **The hinge must be one-sided.** Pinning apparent age in both directions (R2, R4) leaves the
+  optimiser no descent direction: the ensemble's own path moves genderage's estimate by many
+  years, and a symmetric hinge vetoes it. The one-sided hinge settles well below zero (the white-box
+  estimator reads 12 to 17 years younger), so the age column is not evidence of a younger look.
+  The sheets are the evidence.
+
 ## Final modes of 2026-09-15 (`eval/run_mode.sh`, colour penalty, decision 12)
 
 Same protocol. `mid`: chroma_weight 30, eps 24; `high`: chroma_weight 30, eps 20; `low` unchanged

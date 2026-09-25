@@ -141,6 +141,16 @@ CONFIGS=(
   "R4|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg age_symmetric=1|"
   "R5|high|--target-strategy far --cloak-arg age_weight=3|jpeg"
   "R6|high|--target-strategy far --cloak-arg age_weight=10 --cloak-arg age_symmetric=1|"
+  # Round 14: on the author's photos far + age 1 still draws folds, far + age 3 with 120 steps looks
+  # clean but loses 0.14 on two ResNets, high + age 3 keeps faint lines. Map age weight against steps
+  # in mid, one larger DSSIM budget, and stronger age weights in high.
+  "Q0|mid|--target-strategy far --cloak-arg age_weight=2 --cloak-arg steps=90 --cloak-arg stop_cos=0.99|"
+  "Q1|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=90 --cloak-arg stop_cos=0.99|"
+  "Q2|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=150 --cloak-arg stop_cos=0.99|jpeg"
+  "Q3|mid|--target-strategy far --cloak-arg age_weight=2 --cloak-arg steps=120 --cloak-arg stop_cos=0.99|"
+  "Q4|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg dssim_budget=0.015|"
+  "Q5|high|--target-strategy far --cloak-arg age_weight=6|jpeg"
+  "Q6|high|--target-strategy far --cloak-arg age_weight=10|"
 )
 want=("$@")
 # SWEEP_STAGE=all (default): cloak and evaluate each configuration in one job, sharing $WORK.
