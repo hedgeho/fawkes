@@ -116,6 +116,7 @@ class FaceCrop:
     scale: float  # working pixels per photo pixel (<= 1)
     image: np.ndarray  # (h, w, 3) float32 RGB in [0, 255], working resolution
     kps: np.ndarray  # (5, 2) landmarks in working-crop coordinates
+    bbox: np.ndarray = None  # (4,) detector box in working-crop coordinates, if known
 
     @property
     def matrix(self):
@@ -161,7 +162,8 @@ def make_crop(photo, bbox, kps, max_side=448):
     else:
         sx = sy = 1.0
     crop_kps = (kps - [x0, y0]) * [sx, sy]
-    return FaceCrop(box=(x0, y0, x3, y3), scale=float(min(sx, sy)), image=region, kps=crop_kps)
+    crop_bbox = ((np.array([x1, y1, x2, y2]) - [x0, y0, x0, y0]) * [sx, sy, sx, sy]).astype(np.float32)
+    return FaceCrop(box=(x0, y0, x3, y3), scale=float(min(sx, sy)), image=region, kps=crop_kps, bbox=crop_bbox)
 
 
 def template_crop(image):
@@ -169,7 +171,7 @@ def template_crop(image):
     image = np.asarray(image, dtype=np.float32)
     h, w = image.shape[:2]
     kps = ARCFACE_DST * [w / TEMPLATE_SIZE, h / TEMPLATE_SIZE]
-    return FaceCrop(box=(0, 0, w, h), scale=1.0, image=image, kps=kps)
+    return FaceCrop(box=(0, 0, w, h), scale=1.0, image=image, kps=kps, bbox=np.array([0, 0, w, h], np.float32))
 
 
 def paste_back(photo, crop, cloaked):

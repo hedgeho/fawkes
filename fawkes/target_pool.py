@@ -35,20 +35,50 @@ def pool_path():
 
 # ----------------------------------------------------------------------------- face attributes
 
+def genderage_path():
+    """Local path of insightface's genderage.onnx (1.3 MB), downloaded and checked on first use."""
+    from huggingface_hub import hf_hub_download
+    from fawkes.models import model_dir, sha256sum
+    path = model_dir() / GENDERAGE_FILE
+    if not path.exists():
+        path = Path(hf_hub_download(GENDERAGE_REPO, GENDERAGE_FILE, local_dir=str(model_dir())))
+        if sha256sum(path) != GENDERAGE_SHA256:
+            path.unlink()
+            raise RuntimeError("sha256 mismatch for genderage.onnx; file removed")
+    return path
+
+
+def genderage_matrix(bbox, size=96):
+    """2x3 map from image pixels to genderage's input: the box centre to the middle, its longer side
+    to size / 1.5, no rotation (insightface's Attribute.get)."""
+    x0, y0, x1, y1 = [float(v) for v in bbox]
+    s = size / (max(x1 - x0, y1 - y0) * 1.5)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    return np.array([[s, 0, size / 2 - s * cx], [0, s, size / 2 - s * cy]], np.float32)
+
+
+class TorchAge:
+    """genderage as a differentiable torch function: apparent age in years of (N,3,H,W) [0,255] RGB
+    crops, each with its genderage matrix (N,2,3). Used by the cloak's age penalty."""
+
+    def __init__(self, device):
+        from fawkes.onnx_torch import OnnxModule
+        self.net = OnnxModule(genderage_path()).to(device).eval()
+
+    def __call__(self, x, matrices):
+        from fawkes.align import warp_to_template
+        aligned = warp_to_template(x / 255.0, matrices, image_size=96) * 255.0
+        return self.net(aligned)[:, 2] * 100.0
+
+
 class AgeGender:
     """insightface's genderage (buffalo_l, 96x96 MobileNet) on CPU: apparent age and sex of a face."""
 
     def __init__(self):
-        from huggingface_hub import hf_hub_download
         from insightface.model_zoo import get_model
-        from fawkes.models import model_dir, onnx_session_options, sha256sum
-        path = model_dir() / GENDERAGE_FILE
-        if not path.exists():
-            path = Path(hf_hub_download(GENDERAGE_REPO, GENDERAGE_FILE, local_dir=str(model_dir())))
-            if sha256sum(path) != GENDERAGE_SHA256:
-                path.unlink()
-                raise RuntimeError("sha256 mismatch for genderage.onnx; file removed")
-        self.model = get_model(str(path), providers=["CPUExecutionProvider"], sess_options=onnx_session_options())
+        from fawkes.models import onnx_session_options
+        self.model = get_model(str(genderage_path()), providers=["CPUExecutionProvider"],
+                               sess_options=onnx_session_options())
         self.model.prepare(ctx_id=-1)
 
     def predict(self, rgb, bbox):

@@ -447,3 +447,31 @@ def test_lpips_penalty_lowers_lpips():
     plain = dist(cloak.Cloaker(surrogates, cloak.CloakParams(**common)).cloak(crops, targets))
     pen = dist(cloak.Cloaker(surrogates, cloak.CloakParams(lpips_weight=20.0, **common)).cloak(crops, targets))
     assert pen < 0.8 * plain, (pen, plain)
+
+
+def test_onnx_torch_matches_onnxruntime():
+    from fawkes.target_pool import GENDERAGE_FILE
+    from fawkes.models import model_dir
+    path = model_dir() / GENDERAGE_FILE
+    if not path.exists():
+        pytest.skip("genderage.onnx not downloaded")
+    import onnxruntime as ort
+    from fawkes.onnx_torch import OnnxModule
+    x = np.random.RandomState(0).uniform(0, 255, (2, 3, 96, 96)).astype(np.float32)
+    sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+    ref = sess.run(None, {sess.get_inputs()[0].name: x})[0]
+    ours = OnnxModule(path)(torch.from_numpy(x)).detach().numpy()
+    np.testing.assert_allclose(ours, ref, atol=1e-3)
+
+
+def test_age_penalty_runs():
+    from fawkes.target_pool import GENDERAGE_FILE
+    from fawkes.models import model_dir
+    if not (model_dir() / GENDERAGE_FILE).exists():
+        pytest.skip("genderage.onnx not downloaded")
+    surrogates = {"a": DummySurrogate(1)}
+    crops = _crops(2)
+    targets = {k: v[0] for k, v in cloak.Cloaker(surrogates).embed(_crops(3)[2:]).items()}
+    params = cloak.CloakParams(steps=6, eps=8.0, dssim_budget=0.05, eot_samples=1, stop_cos=1.01, age_weight=1.0)
+    res = cloak.Cloaker(surrogates, params).cloak(crops, targets)
+    assert len(res.images) == 2 and np.isfinite(res.cos).all()

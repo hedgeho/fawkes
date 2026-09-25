@@ -44,6 +44,8 @@ class CloakParams:
     shade_weight: float = 0.0  # >0: penalty on darkening band-pass luma (wrinkle-scale lines) on smooth skin
     lpips_weight: float = 0.0  # >0: penalty per unit of LPIPS (AlexNet) above `lpips_budget`; needs the lpips package
     lpips_budget: float = 0.0
+    age_weight: float = 0.0  # >0: penalty per decade of apparent age (insightface genderage) added beyond `age_margin`
+    age_margin: float = 1.0  # years of apparent ageing allowed for free
     flow_eps: float = 0.0  # >0: add a smooth sub-pixel displacement field bounded to this many crop pixels
     flow_lr: float = 0.05  # Adam step of the displacement field, crop pixels
     patience: int = 10  # stop a face when its clean loss has not improved for this many clean steps
@@ -349,6 +351,19 @@ def _stack_crops(crops):
     return images, mask
 
 
+def _genderage_matrices(crops):
+    """(N,2,3) genderage input maps for the crops, from the detector box (or the landmarks' extent)."""
+    from fawkes.target_pool import genderage_matrix
+    out = []
+    for c in crops:
+        box = c.bbox
+        if box is None:
+            (x0, y0), (x1, y1) = c.kps.min(axis=0), c.kps.max(axis=0)
+            box = (x0 - (x1 - x0) * 0.4, y0 - (y1 - y0) * 1.2, x1 + (x1 - x0) * 0.4, y1 + (y1 - y0) * 0.5)
+        out.append(genderage_matrix(box))
+    return np.stack(out)
+
+
 class Cloaker:
     def __init__(self, surrogates, params=None, verbose=False):
         """surrogates: {key: nn.Module} as returned by fawkes.models.load_surrogate."""
@@ -380,6 +395,12 @@ class Cloaker:
         if p.delta_sigma > 0:
             delta = gaussian_blur(delta, p.delta_sigma)
         return delta * mask
+
+    def _age_model(self):
+        if getattr(self, "_age", None) is None:
+            from fawkes.target_pool import TorchAge
+            self._age = TorchAge(self.device)
+        return self._age
 
     @property
     def keys(self):
@@ -506,6 +527,11 @@ class Cloaker:
         emap = eps_map(images, p.eps, p.eps_floor, p.texture_ref)
         smooth = 1 - texture_map(images, p.texture_ref) if p.shade_weight > 0 else None
         lp_net = lpips_model(dev) if p.lpips_weight > 0 else None
+        age_fn = clean_age = None
+        if p.age_weight > 0:
+            age_fn, age_m = self._age_model(), _genderage_matrices(crops)
+            with torch.no_grad():
+                clean_age = age_fn(images, age_m)
         area = mask[:, 0].sum(dim=(1, 2))
 
         best_delta = torch.zeros_like(images)
@@ -545,6 +571,8 @@ class Cloaker:
                 shade = (darkening_lines(x - base, smooth).mul(mask[:, 0]).sum(dim=(1, 2)) / area + 1e-6).sqrt()
                 penalty = penalty + p.shade_weight * shade / 255.0
             lp = None
+            if age_fn is not None:
+                penalty = penalty + p.age_weight * F.relu(age_fn(x, age_m) - clean_age - p.age_margin) / 10.0
             if lp_net is not None:
                 lp = lpips_distance(lp_net, x, images)
                 penalty = penalty + p.lpips_weight * F.relu(lp - p.lpips_budget)
