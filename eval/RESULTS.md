@@ -290,7 +290,7 @@ clean but loses 0.14 on two ResNets, and `high` with age 3 keeps faint lines. Ro
 weight against steps. The author still saw all of these, so round 15 is a ladder of smaller budgets
 with the far + age 3 + 120-step recipe (L0 = R3 above), judged on the photos at feed size
 (`eval/showcase.py` now writes 1080-pixel JPEGs as well). The author picked L2 as the strongest rung
-he could not see. Round 16 asks what protects at L2's budget.
+the author could not see. Round 16 asks what protects at L2's budget.
 
 | label | base | changes | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | DSSIM face |
 |---|---|---|---|---|---|---|---|
