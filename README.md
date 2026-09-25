@@ -57,7 +57,7 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
 
   | mode | surrogates | steps | max pixel change | DSSIM budget | colour penalty | age penalty | s / face, GPU |
   |---|---|---|---|---|---|---|---|
-  | low | AdaFace IR-101, ArcFace IR-100 | 60 | 16 | 0.012 | - | - | 0.6 |
+  | low | AdaFace IR-101, ArcFace IR-100 | 60 | 16 | 0.012 | - | - | 1.1 |
   | subtle | + LVFace-B, LVFace-L, LVFace-S (transformers) | 120 | 12 | 0.006 | 30 | 1 | 2.7 |
   | mid | same five | 120 | 24 | 0.012 | 30 | 2 | 3.3 |
   | high | same five | 200 | 20 | 0.017 | 30 | 3 | 8.3 |
@@ -96,7 +96,7 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
 
   Every mode also penalises what is left of your own identity in the cloaked face
   (`--self-weight`, see [docs/DECISIONS.md](docs/DECISIONS.md#10-penalise-the-residual-similarity-to-the-own-face-not-only-the-distance-to-the-target)).
-  `mid` and `high` penalise the colour part of the cloak, which is what shows as reddish or
+  All but `low` penalise the colour part of the cloak, which is what shows as reddish or
   yellowish patches on the skin, and spend the DSSIM budget on luma detail instead
   (`--chroma-weight`, [decision 12](docs/DECISIONS.md#12-penalise-the-colour-of-the-cloak-and-raise-the-luma-bound)).
   All but `low` also penalise the apparent ageing of the face: without it the cloak draws folds and
@@ -106,8 +106,8 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
 * `--models`: comma-separated surrogate keys overriding the mode (`python -m fawkes.models list`).
 * `--steps`, `--eps`, `--th`, `--no-eot`, `--self-weight`: override the mode's steps, pixel bound,
   DSSIM budget, robustness views and residual penalty.
-* `--chroma-weight`: penalty on the colour (Cb/Cr) part of the cloak (30 in `mid` and `high`,
-  0 in `low`). Higher values leave less visible tint and, above about 30, less protection;
+* `--chroma-weight`: penalty on the colour (Cb/Cr) part of the cloak (30 in `subtle`, `mid` and
+  `high`, 0 in `low`). Higher values leave less visible tint and, above about 30, less protection;
   `--chroma-eps` is a hard bound on the colour change instead (0-255 units, `0` for a grey cloak),
   which costs more protection for the same tint (rounds 8 to 10 in [eval/RESULTS.md](eval/RESULTS.md)).
 * `--batch-size`: faces optimised together (default 8; larger batches are faster per face).
@@ -140,9 +140,9 @@ the same directory every time; the embedding is cached in `<target-dir>/fawkes_t
 
 ### Tips
 
-- Run time on an 8-core CPU without a GPU is about 35 s per face in `low` and a minute per face in
-  `mid`; batching several faces is faster per face. A CUDA GPU is used automatically when PyTorch
-  finds one (install with the `cu128` extra).
+- Run time on an 8-core CPU without a GPU is about 35 s per face in `low` and several minutes per
+  face in the other modes; batching several faces is faster per face. A CUDA GPU is used
+  automatically when PyTorch finds one (install with the `cu128` extra).
 - Most of your published photos need to be cloaked for the protection to work; a recogniser trained
   on mostly clean photos of you learns your real face regardless.
 - Cloaks survive JPEG re-encoding by design, but do not resize or filter the output more than a
@@ -179,7 +179,7 @@ deployments use (`buffalo_l`, a ResNet-50; `antelopev2`, a ResNet-100) and a vis
 | Fawkes 2, mid (no colour penalty), JPEG 75 | 0.74 | 0.84 | 0.44 | 0.92 | 0.013 | - |
 | Fawkes 2, mid | 0.86 | 0.94 | 0.46 | 0.94 | 0.013 | 78 (CPU), 1.3 (H100) |
 | Fawkes 2, mid, JPEG 75 | 0.82 | 0.88 | 0.38 | 0.92 | 0.013 | - |
-| Fawkes 2, high (three surrogates, 2026-09-12) | 0.82 | 0.92 | 0.52 | 0.78 | 0.017 | about 190 (CPU), 2.8 (A100) |
+| Fawkes 2, high (three surrogates, 2026-09-12, rerun Z0) | 0.82 | 0.92 | 0.52 | 0.78 | 0.017 | about 190 (CPU), 2.8 (A100) |
 | Fawkes 2, high (no colour penalty, 2026-09-13) | 0.86 | 0.92 | 0.70 | 0.96 | 0.016 | about 250 (CPU, estimated), 4.4 (A100) |
 | Fawkes 2, high (no colour penalty), JPEG 75 | 0.86 | 0.90 | 0.68 | 0.96 | 0.016 | - |
 | Fawkes 2, high | 0.92 | 0.98 | 0.64 | 0.94 | 0.016 | about 250 (CPU, estimated), 4.2 (A100) |
@@ -190,27 +190,29 @@ deployments use (`buffalo_l`, a ResNet-50; `antelopev2`, a ResNet-100) and a vis
 | Fawkes 2 (2026-09-25), high, automatic target, JPEG 75 | 0.94 | 0.96 | 0.78 | 0.98 | 0.017 | - |
 
 The original cloaks move the embeddings a little but every protected identity is still recognised.
-Fawkes 2 defeats the classifier for most identities on the ResNet recognisers and, since the
-ensemble gained two more transformers (`mid` and `high`), for two thirds of them on the
-transformer evaluator; a fourth evaluator, LVFace-T, is a transformer from the same family as
-three of the surrogates and is a weaker test. The current modes also penalise the colour of the
-cloak (decision 12): the smooth reddish and yellowish patches the earlier cloaks left on the skin
-are halved (the low-passed chroma of the change inside the face box goes from 2.0 to 0.9 grey
-levels) at equal or better protection, except for a few points on the transformer evaluator in
-`high` and under JPEG in `mid`.
+Fawkes 2 defeats the classifier for most identities on the ResNet recognisers. On the transformer
+evaluator `mid` / `high` went from 0.32 / 0.52 with three surrogates to 0.48 / 0.70 once the
+ensemble gained two more transformers, and to 0.70 / 0.78 with the matched target; a fourth
+evaluator, LVFace-T, is a transformer from the same family as three of the surrogates and is a
+weaker test. The current modes also penalise the colour of the cloak (decision 12): the smooth
+reddish and yellowish patches the earlier cloaks left on the skin are halved (the low-passed chroma
+of the change inside the face box goes from 2.0 to 0.9 grey levels, 1.1 in the 2026-09-25 modes) at
+equal or better protection, except for a few points on the transformer evaluator in `high` and under
+JPEG in `mid`.
 The 2026-09-25 modes (decision 13) add the matched automatic target and the age penalty; the rows are
 the sweep configurations that became the modes (R5, Q3, M4 in eval/RESULTS.md), with the
 automatic target instead of the harness's random one. The earlier rows cloak toward a random LFW
 identity. `subtle` is the price of a cloak that is hard to see: on the author's photos every setting
 that protected more than it also showed, and the strength at which nothing showed protected nothing.
-Under 1:1 verification with the usual 0.3 cosine threshold, every cloaked photo in `mid` and
-`high` fails to match its own identity on all three evaluators. The table is for an adversary that
-trains on the cloaked photos and meets clean ones; with the sides swapped (`--clean-gallery`: the
-adversary already holds clean photos and meets a cloaked one), the same cloaks give 0.80 / 0.91 /
-0.55 / 0.97 in `mid` and 0.89 / 0.93 / 0.71 / 1.00 in `high`. Each number is 50 test photos, so
-differences below about 0.06 are noise. Every configuration tried on the way to these settings is
-in [eval/RESULTS.md](eval/RESULTS.md); the reasoning is in [docs/DECISIONS.md](docs/DECISIONS.md). See [eval/README.md](eval/README.md) for the metrics and
-how to run it.
+Under 1:1 verification with the usual 0.3 cosine threshold, every cloaked photo in `high` fails to
+match its own identity on all four evaluators, 99 percent in `mid`, and 96 percent in `subtle` (84
+percent on AdaFace ViT-B). The table is for an adversary that trains on the cloaked photos and meets
+clean ones; with the sides swapped (`--clean-gallery`: the adversary already holds clean photos and
+meets a cloaked one), the 2026-09-13 cloaks give 0.80 / 0.91 / 0.55 / 0.97 in `mid` and 0.89 / 0.93
+/ 0.71 / 1.00 in `high`. Each number is 50 test photos, so differences below about 0.06 are noise.
+Every configuration tried on the way to these settings is in [eval/RESULTS.md](eval/RESULTS.md); the
+reasoning is in [docs/DECISIONS.md](docs/DECISIONS.md). See [eval/README.md](eval/README.md) for the
+metrics and how to run it.
 
 Quick Installation
 ------------------
@@ -223,9 +225,10 @@ uv sync --extra cpu          # or: uv sync --extra cu128
 uv run fawkes -d ./imgs -t ./target --mode mid
 ```
 
-Plain `pip install torch .` also works on Python 3.11 or newer. The face detector (17 MB) and the surrogate
-weights (about 930 MB for `mid`, 250 MB for `low`) are downloaded from Hugging Face on first use
-into `fawkes/model/`; `python -m fawkes.models download` prefetches them.
+Plain `pip install torch .` also works on Python 3.11 or newer. The face detector (17 MB) and the
+surrogate weights (about 2.2 GB for `subtle`, `mid` and `high`, 500 MB for `low`) are downloaded
+from Hugging Face on first use into `fawkes/model/`; `python -m fawkes.models download` prefetches
+them.
 
 ### GPU
 
@@ -240,11 +243,12 @@ Model licences
 | key | model | source | licence |
 |---|---|---|---|
 | detector | SCRFD-10GF | [InsightFace](https://github.com/deepinsight/insightface) | non-commercial research |
+| age penalty, target pool | genderage | [InsightFace](https://github.com/deepinsight/insightface) | non-commercial research |
 | arcface_r100 | ArcFace IR-100, MS1MV3 | [InsightFace arcface_torch](https://github.com/deepinsight/insightface/tree/master/recognition/arcface_torch) | non-commercial research |
 | adaface_ir101 | AdaFace IR-101, WebFace12M | [CVLface](https://github.com/mk-minchul/CVLface) | follows WebFace12M (research) |
 | lvface_b | LVFace-B, Glint360K | [ByteDance LVFace](https://github.com/bytedance/LVFace) | non-commercial research |
 | lvface_l | LVFace-L (ViT-L), Glint360K | [ByteDance LVFace](https://github.com/bytedance/LVFace) | non-commercial research |
-| lvface_s | LVFace-S (ViT-S), Glint360K, optional | [ByteDance LVFace](https://github.com/bytedance/LVFace) | non-commercial research |
+| lvface_s | LVFace-S (ViT-S), Glint360K | [ByteDance LVFace](https://github.com/bytedance/LVFace) | non-commercial research |
 | evaluators | w600k_r50, glintr100, AdaFace ViT-B, LVFace-T | InsightFace, CVLface, LVFace | research |
 
 Development

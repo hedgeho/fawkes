@@ -142,7 +142,8 @@ the target leads the gradient.
 
 **Evidence.** Measured with the harness on 2026-09-12 (LFW, 10 protected + 10 clean identities,
 one target per identity, GPU): the target-only `mid` cloak moves every photo far from its identity
-by the 1:1 verification measure (71 percent of cloaked photos below the 0.3 cosine threshold) yet
+by the 1:1 verification measure (68 to 71 percent of cloaked photos below the 0.3 cosine threshold
+on the ResNets) yet
 the linear probe still recognises 80 to 98 percent of the protected people (protection 0.20 / 0.14 /
 0.02 on `buffalo_l` / `antelopev2` / `adaface_vit_b`). The probe works from the residual: the mean
 cosine of a cloaked photo to its identity's clean centroid is 0.23 to 0.35, against 0.0 for
@@ -184,18 +185,18 @@ of three, about 1.3 times the CPU time per face in `mid` (74 s against 56 s on 8
 1.9 times on a GPU.
 
 **What was tried and rejected.** Token gradient regularisation
-([TGR, CVPR 2023](https://arxiv.org/abs/2303.15754)) halves the transformer protection in every
-combination: zeroing the extreme-token gradients through 24 blocks removes most of the signal a
-targeted cosine loss needs, and the published gains are for untargeted ImageNet attacks on
-12-block models. The skip-gradient decay for transformers
-([2410.08950](https://arxiv.org/abs/2410.08950)) is neutral. A blurred (low-frequency)
-perturbation loses on every evaluator at this DSSIM budget, against the ImageNet finding that
-transformers respond to low frequencies ([2505.19613](https://arxiv.org/abs/2505.19613)): the
-budget already spends most of its energy at low frequencies, and the blur removes the part the
-recognisers see. Per-surrogate gradient normalisation neither helps nor hurts and costs 20 to 30
-percent, so it stays available but off. It was necessary for a fair test: PNA, TGR and SGM shrink
-the transformer's input gradient by one to two orders of magnitude without changing its loss,
-and a summed gradient would otherwise drop the transformer from the update.
+([TGR, CVPR 2023](https://arxiv.org/abs/2303.15754)) lowers the transformer protection in every
+combination, and roughly halves it with LVFace-L in the ensemble: zeroing the extreme-token gradients through 24
+blocks removes most of the signal a targeted cosine loss needs, and the published gains are for
+untargeted ImageNet attacks on 12-block models. The skip-gradient decay for transformers
+([2410.08950](https://arxiv.org/abs/2410.08950)) is neutral. A blurred (low-frequency) perturbation
+loses on every evaluator at this DSSIM budget, against the ImageNet finding that transformers
+respond to low frequencies ([2505.19613](https://arxiv.org/abs/2505.19613)): the budget already
+spends most of its energy at low frequencies, and the blur removes the part the recognisers see.
+Per-surrogate gradient normalisation neither helps nor hurts and costs 20 to 30 percent, so it stays
+available but off. It was necessary for a fair test: PNA, TGR and SGM shrink the transformer's input
+gradient by one to two orders of magnitude without changing its loss, and a summed gradient would
+otherwise drop the transformer from the update.
 
 **Would change it.** A genuinely different transformer evaluator (PETALface Swin, the WebFace42M
 ViT-L, TransFace on MS1MV2, KP-RPE on WebFace12M; see `docs/FURTHER_WORK.md`) showing that the
@@ -237,7 +238,7 @@ under JPEG 75). On the author's own photos the low-passed chroma of the change d
 to 0.9 and from 1.3 to 0.7 grey levels; what remains visible is luma contouring around the eyes
 and nose, which is the attack itself.
 
-**What was tried and rejected.** Hard chroma bounds of 4, 2 and 0 (rounds 8); weight 50 and above
+**What was tried and rejected.** Hard chroma bounds of 4, 2 and 0 (round 8); weight 50 and above
 (the transformer collapses); weight 30 with more steps (no gain); weight 60 in `high` (80 percent
 of the chroma removed, but the transformer loses 0.16 with eps 20 and 0.26 with eps 16). A chroma-only budget in the opposite sense (hiding the
 cloak in colour, [2003.00883](https://arxiv.org/abs/2003.00883)) was already listed as not
@@ -272,9 +273,9 @@ shift at +10 years in `mid` and up to +33 in `high` (29 to 62). Rounds 11 to 16 
   cost budget without changing identity. On its own it still draws age.
 - Only the age penalty removes the folds. LPIPS in the loss, a texture-masked pixel bound and a
   penalty on dark wrinkle-scale lines leave them, and LPIPS costs the transformer 0.12 to 0.20. A
-  sub-pixel warp raises transfer but shows. The penalty needs steps: at 60 it costs 0.2 to 0.3, at
+  sub-pixel warp raises transfer but shows. The penalty needs steps: at 60 it costs 0.2 to 0.4, at
   120 (`mid`, Q3) the result is 0.88 / 0.88 / 0.70 / 0.86, and in 200-step `high` it is free
-  (0.96 / 0.96 / 0.78 / 0.98, the same under JPEG 75).
+  (0.96 / 0.96 / 0.78 / 0.98, within 0.02 under JPEG 75).
 - The hinge must be one-sided: penalising a younger reading as well leaves the optimiser no
   direction and protection drops to zero.
 - The author still saw the mid-budget cloaks. A ladder of budgets found the strongest invisible
@@ -294,7 +295,8 @@ needed, and the rest is a choice of strength, which is what the modes are.
 weight 10 in `mid` (no protection), and pushing the apparent age younger (`age_margin` -3).
 
 **Caveats.** The age penalty and the age column use the same estimator, so the column is not
-evidence of a younger look (it reads 10 to 17 years younger); the evidence is the sheets. The pool
+evidence of a younger look (it reads 12 to 18 years younger at the `mid` and `high` budgets, 6 in
+`subtle`); the evidence is the sheets. The pool
 is LFW, mostly middle-aged men; for others the best skin or age match is sometimes poor (skin
 delta E 30 for one face in the author's photos). The `subtle` and `mid` numbers are single runs
 (noise about 0.06) and have no JPEG measurement; `mid` at age weight 3 with 150 steps (Q2) lost

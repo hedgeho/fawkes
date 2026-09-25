@@ -24,6 +24,7 @@ Flags:
 | `--mode` | `mid` | passed to the cloaker |
 | `--batch-size` | 1 | faces the v2 cloaker optimises together (16 on a GPU) |
 | `--cloak-arg NAME=VALUE` | none | repeatable; overrides a `CloakParams` field of the v2 cloaker (`steps`, `eps`, `dssim_budget`, `self_weight`, `laggard`, `stop_cos`, `models=a,b`, the transformer switches `pna`, `tgr`, `sgm`, `token_mask`, `patchout`, `delta_sigma`, `grad_norm`, the colour limits `chroma_eps`, `chroma_weight`, ...) |
+| `--target-strategy {random,near,far}` | `random` | `random`: a random LFW identity per protected identity (the protocol of the earlier rounds); `near` / `far`: Fawkes's automatic matched target from its pool, as in real use |
 | `--shared-target` | off | all protected identities mimic the same target (default: a different target per identity, as with independent users) |
 | `--tag` | none | label added to the results file name and the report header |
 | `--jpeg Q` | off | re-encode every cloaked photo as JPEG quality Q before the adversary sees it (a social-network upload) |
@@ -94,7 +95,7 @@ their own identity.
 **PSNR / DSSIM photo / DSSIM face box** compare the cloaked PNG with the clean one (before any
 JPEG re-encoding). DSSIM = (1 − SSIM)/2. "face box" restricts DSSIM to the bounding box of the
 pixels the cloaker changed, which is the face crop for Fawkes and is the region its per-mode DSSIM
-budget (0.004 / 0.012 / 0.017) refers to. **s/photo** is wall-clock seconds per cloaked photo on this
+budget (0.012 in `low` and `mid`, 0.006 in `subtle`, 0.017 in `high`) refers to. **s/photo** is wall-clock seconds per cloaked photo on this
 machine.
 
 ## Caveat: evaluators and surrogates must be disjoint

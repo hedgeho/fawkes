@@ -177,10 +177,10 @@ What round 9 says:
 - The penalty trades smoothly: each step of 10 in the weight removes about a quarter of the
   remaining visible chroma. Up to weight 20 the protection is within run-to-run noise of the
   baseline (T9, T10); at 30 the transformer evaluator loses 0.14 (T4); at 50 it collapses (T11).
-- More steps do not buy the lost transfer back (T12), a larger luma bound does: weight 30 with
-  eps 20 (T15) has half the chroma of the baseline and the same or better protection on every
-  evaluator at the same DSSIM. The chroma the penalty removes is replaced by luma detail, which
-  the DSSIM budget, not the L-inf bound, was limiting.
+- More steps do not buy the lost transfer back (T12), a larger luma bound mostly does: weight 30
+  with eps 20 (T15) has half the chroma of the baseline, better protection on the ResNets, the same
+  on LVFace-T and 0.06 less on AdaFace ViT-B, at the same DSSIM. The chroma the penalty removes is
+  replaced by luma detail, which the DSSIM budget, not the L-inf bound, was limiting.
 - In high mode weight 30 halves the chroma for a loss of 0.18 on the transformer against the
   2026-09-13 high (T13); weight 60 is too much (T14). Round 10 checks the eps 20 lever there.
 
@@ -223,9 +223,9 @@ What round 10 says:
 On the author's high-resolution photos the decision-12 cloaks read as ageing: they draw nasolabial
 folds, lines under the eyes and cheekbone shading. insightface's genderage estimator agrees. On five
 real photos with Obama as target the apparent age rises by 9.8 years in `mid` and by up to 33 years
-in the 09-15 `high` (29 to 62). On the 250-pixel LFW photos the same measure is noise (mean
-within ±1 year, p90 5 to 7), so the visual judgement comes from `eval/showcase.py` sheets of real
-photos, and the harness supplies the protection numbers.
+in the 09-15 `high` (29 to 62). On the 250-pixel LFW photos the same measure is noise (mean within
+±2 years, p90 4 to 8 in every run without the age penalty), so the visual judgement comes from
+`eval/showcase.py` sheets of real photos, and the harness supplies the protection numbers.
 
 New columns: *LPIPS* (AlexNet, face box) and *age shift* (genderage, cloaked minus clean, years;
 not held out once `age_weight` is on). Targets: *random* is the harness protocol, a random LFW
@@ -274,13 +274,13 @@ What rounds 11 to 13 say:
   dark wrinkle-scale lines leave the folds on the real photos, and LPIPS costs the transformer
   0.12 to 0.20. The sub-pixel warp adds transfer, but DSSIM rises to 0.033 because the warp sits
   outside the pixel budget, and it shows. With `age_weight` 3 the sheets look close to clean.
-- **The age penalty costs steps, not budget.** In 60-step `mid` it costs 0.2 to 0.3 per evaluator
+- **The age penalty costs steps, not budget.** In 60-step `mid` it costs 0.2 to 0.4 per evaluator
   (S12, R1); in 200-step `high` it is within noise (S16 against S17). On the far target, weight 1
   in `mid` (R0) is still better than the 09-15 mid on three evaluators.
 - **The hinge must be one-sided.** Pinning apparent age in both directions (R2, R4) leaves the
   optimiser no descent direction: the ensemble's own path moves genderage's estimate by many
   years, and a symmetric hinge vetoes it. The one-sided hinge settles well below zero (the white-box
-  estimator reads 12 to 17 years younger), so the age column is not evidence of a younger look.
+  estimator reads 12 to 18 years younger), so the age column is not evidence of a younger look.
   The sheets are the evidence.
 
 ## Rounds 14 to 16 (2026-09-25): age penalty against steps, and a strength ladder
@@ -316,22 +316,24 @@ the author could not see. Round 16 asks what protects at L2's budget.
 What rounds 14 to 16 say:
 
 - At the mid budget age weight 2 with 120 steps (Q3) is the best trade: within 0.06 of the 09-15
-  mid on the ResNets and 0.26 better on the transformer. More weight or steps do not pay; more
-  budget (Q4) buys 0.02. In `high` weights 6 and 10 cost 0.1 on the ResNets over weight 3 (R5) and
-  do not look different, so `high` keeps weight 3.
-- Protection falls off a cliff below the mid budget with age weight 3. The ladder rungs stop at
-  half their DSSIM budget: the age penalty holds the attack back once the budget is tight.
+  mid on the ResNets, 0.24 better on AdaFace ViT-B and 0.08 lower on LVFace-T. More weight or
+  steps do not pay; more budget (Q4) buys 0.02. In `high` weights 6 and 10 cost 0.06 to 0.10 on the
+  ResNets over weight 3 (R5) and do not look different, so `high` keeps weight 3.
+- Protection falls off a cliff below the mid budget with age weight 3. The ladder rungs stop well
+  short of their DSSIM budget (L1 at 80 percent, L2 to L4 at half or less): the age penalty holds
+  the attack back once the budget is tight.
 - Without the penalty the L2 budget protects (M1, M2: about 0.75 on the ResNets), but on the
   photos the folds return. Weight 1 (M4) is between the two on both counts and became `subtle`. The
   far target beats the near one here too (M2 against M3).
-- M5 (L1's budget without the penalty) protects better than the 09-15 mid at 70 percent of its
-  DSSIM. It shows the same kind of change as `mid`, so it is not a mode.
+- M5 (L1's budget without the penalty) protects better than the 09-15 mid on three evaluators (0.04
+  lower on LVFace-T) at 70 percent of its DSSIM. It shows the same kind of change as `mid`, so it is
+  not a mode.
 
 ## Final modes of 2026-09-15 (`eval/run_mode.sh`, colour penalty, decision 12)
 
 Same protocol. `mid`: chroma_weight 30, eps 24; `high`: chroma_weight 30, eps 20; `low` unchanged
 and not re-run. The mid run repeats T22 within 0.02 on every evaluator, the high run T20 within
-0.02 except antelopev2 (0.98 against 1.00). Cloaks computed on H100 (mid) and A100 (high) nodes.
+0.02 except LVFace-T (0.94 against 0.98). Cloaks computed on H100 (mid) and A100 (high) nodes.
 
 | mode | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | DSSIM face | chroma LF | luma LF | s/photo |
 |---|---|---|---|---|---|---|---|---|
@@ -359,11 +361,11 @@ every evaluator, the mid run repeats Z19 within 0.02.
 
 ## Clean gallery (2026-09-13, `--clean-gallery`, same cloaks as the final modes above)
 
-The other threat model: the adversary enrolled the person from clean photos before any cloak
-existed and meets a cloaked photo later. Same cloaks, probe trained on the 5 clean test photos per
-identity, asked to recognise the 100 cloaked train photos. Evaluated on a CPU from the cluster's
-cloaks and embedding caches. The 1:1 columns (every cloaked photo below the 0.3 threshold on every
-evaluator) are unchanged by construction.
+The other threat model: the adversary enrolled the person from clean photos before any cloak existed
+and meets a cloaked photo later. Same cloaks, probe trained on the 5 clean test photos per identity,
+asked to recognise the 100 cloaked train photos. Evaluated on a CPU from the cluster's cloaks and
+embedding caches. The 1:1 columns (the fraction of cloaked photos below the 0.3 threshold: 1.00 on
+the ResNets and LVFace-T, 0.97 to 1.00 on AdaFace ViT-B) are unchanged by construction.
 
 | mode | buffalo_l | antelopev2 | adaface_vit_b | lvface_t |
 |---|---|---|---|---|
