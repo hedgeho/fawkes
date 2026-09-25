@@ -121,6 +121,16 @@ CONFIGS=(
   "S8|mid|--cloak-arg shade_weight=100|"
   "S9|mid|--cloak-arg flow_eps=1.0|"
   "S10|mid|--cloak-arg flow_eps=1.0 --cloak-arg eps=16|"
+  # Round 12: on the author's photos only the age penalty (genderage in the loss) removes the folds and
+  # eye-bag lines; LPIPS, the texture floor and the line penalty leave them, the warp adds its own. The
+  # age penalty alone, with the matched near target, pushed younger, stronger, and in high mode.
+  "S11|mid|--cloak-arg age_weight=1|"
+  "S12|mid|--cloak-arg age_weight=3|"
+  "S13|mid|--cloak-arg age_weight=3 --target-strategy near|jpeg"
+  "S14|mid|--cloak-arg age_weight=3 --cloak-arg age_margin=-3 --target-strategy near|"
+  "S15|mid|--cloak-arg age_weight=10 --target-strategy near|"
+  "S16|high|--cloak-arg age_weight=3 --target-strategy near|jpeg"
+  "S17|high|--target-strategy near|"
 )
 want=("$@")
 # SWEEP_STAGE=all (default): cloak and evaluate each configuration in one job, sharing $WORK.
