@@ -151,6 +151,13 @@ CONFIGS=(
   "Q4|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg dssim_budget=0.015|"
   "Q5|high|--target-strategy far --cloak-arg age_weight=6|jpeg"
   "Q6|high|--target-strategy far --cloak-arg age_weight=10|"
+  # Round 15: the author still sees every candidate at the mid budget. A strength ladder of the same
+  # recipe (far target, age weight 3, 120 steps) at smaller DSSIM budgets and pixel bounds, to find
+  # the weakest cloak that is not seen and what it protects.
+  "L1|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg dssim_budget=0.008 --cloak-arg eps=16|"
+  "L2|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg dssim_budget=0.006 --cloak-arg eps=12|"
+  "L3|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg dssim_budget=0.004 --cloak-arg eps=8|"
+  "L4|mid|--target-strategy far --cloak-arg age_weight=3 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg dssim_budget=0.003 --cloak-arg eps=6|"
 )
 want=("$@")
 # SWEEP_STAGE=all (default): cloak and evaluate each configuration in one job, sharing $WORK.

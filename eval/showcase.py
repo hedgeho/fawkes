@@ -6,7 +6,8 @@ face crops for looking at, plus LPIPS and the apparent-age shift per configurati
 
 A config is label|mode|comma-separated name=value overrides; `target=near|far` uses the automatic
 target, otherwise --target-dir is used. Output: <out>/<label>/<photo>_cloaked.png, and
-<out>/sheets/<photo>_face<k>.jpg with the clean face and one column per configuration.
+<out>/sheets/<photo>_face<k>.jpg with the clean face and one column per configuration, and
+<out>/phone/<label>/<photo>.jpg, the whole photo as a feed shows it (1080 px wide, JPEG 85).
 """
 import argparse
 import os
@@ -93,6 +94,18 @@ def main(argv=None):
             name = os.path.splitext(os.path.basename(clean_p))[0]
             sheet.save(os.path.join(sheets, f"{name}_face{k}.jpg"), quality=92)
     print(f"sheets in {sheets}")
+
+    # what a feed shows: the whole photo, 1080 px wide, JPEG 85; flip between the folders to compare
+    phone = os.path.join(args.out, "phone")
+    for label, pairs in [("clean", [(c, c) for c, _ in outputs[first]])] + list(outputs.items()):
+        d = os.path.join(phone, label)
+        os.makedirs(d, exist_ok=True)
+        for _, cloaked_p in pairs:
+            im = Image.open(cloaked_p).convert("RGB")
+            im = im.resize((1080, round(im.height * 1080 / im.width)), Image.LANCZOS)
+            name = os.path.basename(cloaked_p).replace("_cloaked", "")
+            im.save(os.path.join(d, os.path.splitext(name)[0] + ".jpg"), quality=85)
+    print(f"phone-size photos in {phone}")
     return 0
 
 
