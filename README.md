@@ -67,22 +67,32 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
   change of the face's shading. On an 8-core CPU without a GPU, `low` takes about 35 s per face; the
   other modes take several minutes (not measured since the step counts were raised).
 
-  ![Three people, each shown clean and cloaked in every mode, with a face classifier's output under every photo](docs/img/modes.jpg)
+  ![Four people, each shown clean and cloaked in every mode, with a face classifier's output under every photo](docs/img/modes.jpg)
 
-  Each column is one person (Barack Obama from Wikimedia Commons, and two people from
+  Each column is one person (Barack Obama from Wikimedia Commons, and three people from
   [LFW](https://vis-www.cs.umass.edu/lfw/)), and each row is a mode. Every tile is one of the three
-  photos that person "posts", cloaked in that row's mode with the automatic target. The lines under a tile
-  are the output of a simple face classifier: buffalo_l embeddings, the mean embedding of a person as the
-  reference, and a cosine threshold of 0.35.
-  - *this photo*: whether the posted photo still matches the person, with a reference built from other,
-    clean photos of them.
-  - *trained on these*: how many of those clean photos match a reference built from the row's three posted
-    photos, as a scraper would build it. This is the protection Fawkes aims for.
+  photos that person "posts", cloaked in that row's mode with the automatic target. The row labels give
+  the mode's protection rate from [Evaluation](#evaluation) on the two ResNet recognisers (buffalo_l /
+  antelopev2) and the two transformers (AdaFace ViT-B / LVFace-T). For `low` these are the 2026-09-12
+  run, which used a random target, and LVFace-T was not measured.
 
-  All the cloaked rows find none, but this setting is easy for the cloak: the scraper sees only cloaked
-  photos of you, and the classifier is a plain centroid. With stronger recognisers and a trained
-  classifier, the protection is partial, lowest in `subtle` (see [Evaluation](#evaluation)). Made
-  with `eval/illustrate.py`.
+  The lines under a tile are the output of a simple face classifier: buffalo_l embeddings, one reference
+  per identity (the mean embedding of its photos), and a cosine threshold of 0.35.
+  - *first line*: the posted photo's cosine similarity to the person's reference, which is built from
+    other, clean photos of them, and the probability the classifier gives the person. The probability
+    is a nearest-reference classifier over all ten people and targets in the figure, softmax(64 ×
+    cosine); 64 is the scale ArcFace-type recognisers are trained with.
+  - *target*: the same for the target Fawkes picked, with the target's reference built from its LFW
+    photos.
+  - *trained on these*: how many of the person's clean photos match a reference built from the row's
+    three posted photos, as a scraper would build it. This is the protection Fawkes aims for.
+
+  In every cloaked row the posted photo is classified as the target with near certainty, and the scraper's
+  reference finds none of the real photos. This setting is easy for the cloak: the scraper sees only
+  cloaked photos, the classifier is a plain centroid, and the target's reference is built from the same
+  photos the cloak aimed at. With a trained classifier and other recognisers the protection is partial,
+  lowest in `subtle`. The cloak can also borrow a feature of the target: Tony Blair gets a faint
+  moustache from José María Aznar. Made with `eval/illustrate.py`.
 
   Every mode also penalises what is left of your own identity in the cloaked face
   (`--self-weight`, see [docs/DECISIONS.md](docs/DECISIONS.md#10-penalise-the-residual-similarity-to-the-own-face-not-only-the-distance-to-the-target)).
