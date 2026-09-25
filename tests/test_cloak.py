@@ -360,3 +360,90 @@ def test_chroma_penalty_lowers_chroma():
     c_plain = _chroma(plain.images[0] - crops[0].image)[1]
     c_pen = _chroma(penalised.images[0] - crops[0].image)[1]
     assert c_pen < 0.7 * c_plain, (c_pen, c_plain)
+
+
+def test_eps_map_is_floor_on_flat_and_full_on_texture():
+    img = torch.full((1, 3, 64, 64), 128.0)
+    img[:, :, :, 32:] += torch.from_numpy(np.random.RandomState(0).uniform(-40, 40, (3, 64, 32))).float()
+    m = cloak.eps_map(img, 10.0, 0.3, 8.0)
+    assert m.shape == (1, 1, 64, 64)
+    assert abs(float(m[0, 0, 32, 5]) - 3.0) < 1e-4 and abs(float(m[0, 0, 32, 60]) - 10.0) < 1e-4
+    assert float(cloak.eps_map(img, 10.0, 1.0, 8.0).min()) == 10.0
+
+
+def test_texture_masked_bound_holds_in_cloak():
+    surrogates = {"a": DummySurrogate(1)}
+    crops = _crops(1)
+    targets = {k: v[0] for k, v in cloak.Cloaker(surrogates).embed(_crops(2)[1:]).items()}
+    params = cloak.CloakParams(steps=20, eps=10.0, dssim_budget=0.05, eot_samples=0, stop_cos=1.01,
+                               patience=30, eps_floor=0.2)
+    res = cloak.Cloaker(surrogates, params).cloak(crops, targets)
+    img = torch.from_numpy(crops[0].image).permute(2, 0, 1)[None]
+    bound = cloak.eps_map(img, 10.0, 0.2, params.texture_ref)[0, 0].numpy()
+    d = np.abs(res.images[0] - crops[0].image).max(axis=-1)
+    assert (d <= bound + 1e-3).all()
+
+
+def test_darkening_lines_sees_dark_lines_not_bright_ones():
+    delta = torch.zeros(1, 3, 100, 100)
+    delta[:, :, 50, 20:80] = -10
+    flat = torch.ones(1, 1, 100, 100)
+    dark = float(cloak.darkening_lines(delta, flat).sum())
+    bright = float(cloak.darkening_lines(-delta, flat).sum())
+    assert dark > 3 * bright > 0
+    assert float(cloak.darkening_lines(delta, torch.zeros_like(flat)).sum()) == 0
+
+
+def test_shade_penalty_lowers_darkening():
+    surrogates = {"a": DummySurrogate(1)}
+    crops = _crops(1)
+    targets = {k: v[0] for k, v in cloak.Cloaker(surrogates).embed(_crops(2)[1:]).items()}
+    common = dict(steps=30, eps=10.0, dssim_budget=0.05, eot_samples=0, stop_cos=1.01, patience=30)
+    img = torch.from_numpy(crops[0].image).permute(2, 0, 1)[None]
+    smooth = 1 - cloak.texture_map(img, 8.0)
+
+    def lines(res):
+        d = torch.from_numpy(res.images[0] - crops[0].image).permute(2, 0, 1)[None]
+        return float(cloak.darkening_lines(d, smooth).mean())
+
+    plain = lines(cloak.Cloaker(surrogates, cloak.CloakParams(**common)).cloak(crops, targets))
+    shaded = lines(cloak.Cloaker(surrogates, cloak.CloakParams(shade_weight=300.0, **common)).cloak(crops, targets))
+    assert shaded < 0.7 * plain, (shaded, plain)
+
+
+def test_warp_flow_identity_and_shift():
+    x = torch.rand(1, 3, 20, 30)
+    assert torch.allclose(cloak.warp_flow(x, torch.zeros(1, 2, 20, 30)), x, atol=1e-5)
+    flow = torch.zeros(1, 2, 20, 30)
+    flow[:, 0] = 1.0
+    shifted = cloak.warp_flow(x, flow)
+    assert torch.allclose(shifted[..., :-1], x[..., 1:], atol=1e-5)
+
+
+def test_flow_cloak_runs_and_moves_toward_target():
+    surrogates = {"a": DummySurrogate(1)}
+    crops = _crops(1)
+    cl = cloak.Cloaker(surrogates)
+    targets = {k: v[0] for k, v in cl.embed(_crops(2)[1:]).items()}
+    before = cl.embed(crops)["a"][0] @ targets["a"]
+    params = cloak.CloakParams(steps=20, eps=4.0, dssim_budget=0.05, eot_samples=0, stop_cos=1.01, patience=30,
+                               flow_eps=1.0, flow_lr=0.2)
+    res = cloak.Cloaker(surrogates, params).cloak(crops, targets)
+    assert res.cos[0, 0] > before + 0.02
+
+
+def test_lpips_penalty_lowers_lpips():
+    lpips = pytest.importorskip("lpips")  # noqa: F841
+    surrogates = {"a": DummySurrogate(1)}
+    crops = _crops(1)
+    targets = {k: v[0] for k, v in cloak.Cloaker(surrogates).embed(_crops(2)[1:]).items()}
+    common = dict(steps=20, eps=10.0, dssim_budget=0.05, eot_samples=0, stop_cos=1.01, patience=30)
+    net = cloak.lpips_model(torch.device("cpu"))
+    img = torch.from_numpy(crops[0].image).permute(2, 0, 1)[None]
+
+    def dist(res):
+        return float(cloak.lpips_distance(net, torch.from_numpy(res.images[0]).permute(2, 0, 1)[None], img))
+
+    plain = dist(cloak.Cloaker(surrogates, cloak.CloakParams(**common)).cloak(crops, targets))
+    pen = dist(cloak.Cloaker(surrogates, cloak.CloakParams(lpips_weight=20.0, **common)).cloak(crops, targets))
+    assert pen < 0.8 * plain, (pen, plain)

@@ -196,7 +196,24 @@ def parse_cloak_args(items):
 
 
 def cloak_v2(paths, args, target_dirs):
-    """One Fawkes instance; the photos are grouped by target so the models load once."""
+    """One Fawkes instance; the photos are grouped by target so the models load once. With a
+    --target-strategy other than random, each protected identity's photos are cloaked together and
+    Fawkes picks their target from the pool (fawkes.target_pool), excluding every harness identity."""
+    if args.target_strategy != "random":
+        from fawkes.protection import Fawkes
+        by_identity = {}
+        for p in paths:
+            by_identity.setdefault(os.path.basename(os.path.dirname(os.path.dirname(p))), []).append(p)
+        protector = Fawkes(mode=args.mode, target_dir=None, batch_size=args.batch_size,
+                           target_strategy=args.target_strategy, target_exclude=args.harness_identities,
+                           **parse_cloak_args(args.cloak_arg))
+        for ident, group in by_identity.items():
+            n_before = len(protector.chosen_targets)
+            rc = protector.run_protection(group)
+            args.chosen_targets[ident] = [r for _, r in protector.chosen_targets[n_before:]]
+            if rc not in (None, 1):
+                print(f"v2 cloaker returned {rc}")
+        return
     groups = {}
     for p in paths:
         groups.setdefault(target_dirs[p], []).append(p)
@@ -425,6 +442,40 @@ def image_quality(pairs):
     return out
 
 
+def perceptual_quality(pairs):
+    """LPIPS (AlexNet) over the face box of the change and the apparent-age shift of the largest face
+    (insightface genderage on the clean face's box, in years, cloaked minus clean). Genderage is not
+    a held-out measure once a cloak penalises age; LPIPS is not once a cloak penalises LPIPS."""
+    import torch
+    from fawkes.detect import Detector
+    from fawkes.target_pool import AgeGender
+    try:
+        from fawkes.cloak import lpips_distance, lpips_model
+        net = lpips_model(torch.device("cpu"))
+    except ImportError:
+        net = None
+    detector, ages = Detector(), AgeGender()
+    lp, d_age = [], []
+    for clean_p, cloaked_p in pairs:
+        a = np.asarray(Image.open(clean_p).convert("RGB"))
+        b = np.asarray(Image.open(cloaked_p).convert("RGB"))
+        if a.shape != b.shape or np.array_equal(a, b):
+            continue
+        faces = detector.detect(a)
+        if faces:
+            d_age.append(ages.predict(b, faces[0].bbox)[0] - ages.predict(a, faces[0].bbox)[0])
+        if net is not None:
+            ys, xs = np.where((a != b).any(axis=-1))
+            box = np.s_[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+            ta = torch.from_numpy(a[box].astype(np.float32)).permute(2, 0, 1)[None]
+            tb = torch.from_numpy(b[box].astype(np.float32)).permute(2, 0, 1)[None]
+            with torch.no_grad():
+                lp.append(float(lpips_distance(net, tb, ta)[0]))
+    mean = lambda v: float(np.mean(v)) if len(v) else None
+    return {"lpips_face": mean(lp), "age_shift": mean(d_age),
+            "age_shift_p90": float(np.percentile(d_age, 90)) if d_age else None}
+
+
 # --------------------------------------------------------------------------- evaluation
 
 def probe_rows(split, workdir, cloaked_files, clean_gallery=False):
@@ -483,11 +534,14 @@ def markdown_report(results):
                      f"{fmt(m['frac_cloaked_below_threshold'])} | {m['n_undetected']} |")
     q = results["quality"]
     lines += ["", "| cloaked photos | uncloaked (cloaker gave no output) | PSNR dB | DSSIM photo | DSSIM face box "
-              "| chroma rms face | chroma LF rms face | luma LF rms face | s/photo |",
-              "|---|---|---|---|---|---|---|---|---|",
+              "| chroma rms face | chroma LF rms face | luma LF rms face | LPIPS face | age shift (p90) | s/photo |",
+              "|---|---|---|---|---|---|---|---|---|---|---|",
               f"| {q['n_cloaked']} | {q['n_uncloaked']} | {fmt(q['psnr'], 1)} | {fmt(q['dssim'], 4)} | "
               f"{fmt(q['dssim_face'], 4)} | {fmt(q.get('chroma_rms_face'), 2)} | {fmt(q.get('chroma_lf_rms_face'), 2)} | "
-              f"{fmt(q.get('luma_lf_rms_face'), 2)} | {fmt(q['seconds_per_photo'], 1)} |"]
+              f"{fmt(q.get('luma_lf_rms_face'), 2)} | {fmt(q.get('lpips_face'), 3)} | "
+              f"{fmt(q.get('age_shift'), 1)} ({fmt(q.get('age_shift_p90'), 1)}) | {fmt(q['seconds_per_photo'], 1)} |"]
+    if results.get("chosen_targets"):
+        lines += ["", "Targets: " + "; ".join(f"{k}: {', '.join(v)}" for k, v in results["chosen_targets"].items())]
     return "\n".join(lines)
 
 
@@ -498,6 +552,9 @@ def parse_args(argv=None):
     ap.add_argument("--batch-size", type=int, default=1, help="cloaker optimisation batch size")
     ap.add_argument("--cloak-arg", action="append", default=None, metavar="NAME=VALUE",
                     help="v2 cloaker parameter override, repeatable (e.g. steps=120, self_weight=1.0)")
+    ap.add_argument("--target-strategy", choices=["random", "near", "far"], default="random",
+                    help="random: a random LFW identity per protected identity (the default protocol); near / far: "
+                         "Fawkes picks a matched target (sex, age, skin tone) from its pool, see fawkes.target_pool")
     ap.add_argument("--shared-target", action="store_true",
                     help="all protected identities mimic one target (default: one target per identity)")
     ap.add_argument("--tag", default=None, help="extra label for the results file and report header")
@@ -540,6 +597,8 @@ def main(argv=None):
     print(f"protected: {[i.name for i in split.protected]}\nclean: {[i.name for i in split.clean]}\n"
           f"targets: {[i.name for i in split.targets]}")
 
+    args.harness_identities = [i.name for i in split.protected + split.clean + split.targets]
+    args.chosen_targets = {}
     to_cloak = [photo_path(workdir, i, "train", n) for i in split.protected for n in range(len(i.train))]
     path_targets = {photo_path(workdir, i, "train", n): target_dirs[i.name]
                     for i in split.protected for n in range(len(i.train))}
@@ -552,6 +611,7 @@ def main(argv=None):
         print(f"cloaked in {fmt(seconds_per_photo, 1)} s/photo; {len(uncloaked)} photos got no cloak")
 
     quality = image_quality([(p, cloaked_path(p)) for p in to_cloak])
+    quality.update(perceptual_quality([(p, cloaked_path(p)) for p in to_cloak]))
     quality.update(n_cloaked=len(to_cloak) - len(uncloaked), n_uncloaked=len(uncloaked), seconds_per_photo=seconds_per_photo)
 
     cloaked_files = {p: cloaked_path(p) for p in to_cloak}
@@ -559,7 +619,8 @@ def main(argv=None):
         cloaked_files = {p: jpeg_reencode(c, args.jpeg) for p, c in cloaked_files.items()}
 
     cache = EmbeddingCache(os.path.join(workdir, "embeddings.sqlite"))
-    results = {"args": vars(args), "split": asdict(split), "quality": quality, "evaluators": {}}
+    results = {"args": vars(args), "split": asdict(split), "quality": quality, "evaluators": {},
+               "chosen_targets": args.chosen_targets}
     for key in args.evaluator:
         print(f"evaluating with {key} ...")
         results["evaluators"][key] = evaluate(make_evaluator(key), cache, split, workdir, cloaked_files,

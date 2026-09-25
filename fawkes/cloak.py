@@ -39,6 +39,13 @@ class CloakParams:
     grad_norm: bool = False  # rescale every surrogate's gradient to the ensemble's mean gradient norm
     chroma_eps: float = math.inf  # L-inf bound on the Cb/Cr chroma of the perturbation, [0, 255] units; 0 = luma only
     chroma_weight: float = 0.0  # >0: penalty weight on the mean Cb/Cr magnitude of the perturbation (as a fraction of 255)
+    eps_floor: float = 1.0  # <1: texture-masked bound, smooth skin gets eps * eps_floor, textured areas the full eps
+    texture_ref: float = 8.0  # local luma std (0-255) at which a region counts as fully textured
+    shade_weight: float = 0.0  # >0: penalty on darkening band-pass luma (wrinkle-scale lines) on smooth skin
+    lpips_weight: float = 0.0  # >0: penalty per unit of LPIPS (AlexNet) above `lpips_budget`; needs the lpips package
+    lpips_budget: float = 0.0
+    flow_eps: float = 0.0  # >0: add a smooth sub-pixel displacement field bounded to this many crop pixels
+    flow_lr: float = 0.05  # Adam step of the displacement field, crop pixels
     patience: int = 10  # stop a face when its clean loss has not improved for this many clean steps
     seed: int = 0
     batch_size: int = 8
@@ -146,6 +153,91 @@ def clamp_chroma(delta, eps):
     ycc = rgb_to_ycc(delta)
     ycc = torch.cat([ycc[:, :1], ycc[:, 1:].clamp(-eps, eps)], dim=1)
     return ycc_to_rgb(ycc)
+
+
+# ----------------------------------------------------------------------------- visibility priors
+
+def _luma(x):
+    return (0.299 * x[:, 0] + 0.587 * x[:, 1] + 0.114 * x[:, 2])[:, None]
+
+
+def texture_map(images, ref):
+    """(N,1,H,W) in [0,1]: local luma standard deviation of the clean crops over `ref`, clipped.
+
+    0 on flat skin (cheeks, forehead, under the eyes), 1 in hair, brows, beard and along edges,
+    where a change of the same size is masked by the image's own detail. The window scales with
+    the crop (sigma 1 percent of the longer side, at least 1.5 px).
+    """
+    sigma = max(1.5, 0.01 * max(images.shape[-2:]))
+    y = _luma(images)
+    mean = gaussian_blur(y, sigma)
+    var = (gaussian_blur(y * y, sigma) - mean ** 2).clamp_min(0)
+    return (var.sqrt() / ref).clamp(0, 1)
+
+
+def eps_map(images, eps, floor, ref):
+    """Per-pixel L-inf bound: `eps * floor` on flat skin rising to `eps` where the crop is textured."""
+    if floor >= 1:
+        return torch.full_like(images[:, :1], float(eps))
+    return eps * (floor + (1 - floor) * texture_map(images, ref))
+
+
+def darkening_lines(delta, smooth):
+    """(N,H,W) squared darkening of the band-passed luma of `delta`, weighted by `smooth` (N,1,H,W).
+
+    A difference of Gaussians (sigma 0.5 and 3 percent of the crop) keeps the scale of wrinkles, crow's
+    feet and nasolabial folds; only its negative part is kept, since thin dark lines on smooth skin are
+    what makes a cloaked face look older. It is squared because the band-pass of a bright line has a
+    dark halo of the same total mass; squaring weights the concentrated dark line far above the halo.
+    Brightening and textured areas are left to the other terms.
+    """
+    size = max(delta.shape[-2:])
+    y = _luma(delta)
+    band = gaussian_blur(y, max(0.8, 0.005 * size)) - gaussian_blur(y, 0.03 * size)
+    return (F.relu(-band) ** 2 * smooth)[:, 0]
+
+
+def warp_flow(images, flow):
+    """Resample (N,3,H,W) `images` at pixel + `flow` ((N,2,H,W), crop pixels, x then y), border padding."""
+    n, _, h, w = images.shape
+    ys, xs = torch.meshgrid(torch.arange(h, dtype=images.dtype, device=images.device),
+                            torch.arange(w, dtype=images.dtype, device=images.device), indexing="ij")
+    gx = (xs[None] + flow[:, 0] + 0.5) * 2 / w - 1
+    gy = (ys[None] + flow[:, 1] + 0.5) * 2 / h - 1
+    grid = torch.stack([gx, gy], dim=-1)
+    return F.grid_sample(images, grid, mode="bilinear", padding_mode="border", align_corners=False)
+
+
+def smooth_flow(free, size):
+    """Upsample the coarse free displacement variable (N,2,h,w) to a smooth field of `size`."""
+    return F.interpolate(free, size=size, mode="bicubic", align_corners=False)
+
+
+_LPIPS = {}
+
+
+def lpips_model(device):
+    """LPIPS (AlexNet, v0.1) on `device`, cached; raises ImportError without the lpips package."""
+    key = str(device)
+    if key not in _LPIPS:
+        import warnings
+        import lpips
+        with warnings.catch_warnings():  # torchvision's deprecation notes about lpips's `pretrained=True`
+            warnings.simplefilter("ignore", UserWarning)
+            net = lpips.LPIPS(net="alex", verbose=False).to(device).eval()
+        for prm in net.parameters():
+            prm.requires_grad_(False)
+        _LPIPS[key] = net
+    return _LPIPS[key]
+
+
+def lpips_distance(net, x, y, size=224):
+    """(N,) LPIPS between (N,3,H,W) [0,255] crops, both resized so the longer side is `size`."""
+    scale = size / max(x.shape[-2:])
+    if scale < 1:
+        x = F.interpolate(x, scale_factor=scale, mode="bilinear", align_corners=False, antialias=True)
+        y = F.interpolate(y, scale_factor=scale, mode="bilinear", align_corners=False, antialias=True)
+    return net(x / 127.5 - 1, y / 127.5 - 1).flatten()
 
 
 # ----------------------------------------------------------------------------- EOT transforms
@@ -401,7 +493,20 @@ class Cloaker:
                 clean_aligned = warp_to_template(images / 255.0, clean_m)
                 self_vecs = {k: model(clean_aligned) for k, model in self.surrogates.items()}
         delta = torch.zeros_like(images, requires_grad=True)
-        opt = torch.optim.Adam([delta], lr=p.lr)
+        groups = [{"params": [delta], "lr": p.lr}]
+        flow_free = None
+        if p.flow_eps > 0:
+            if p.grad_norm:
+                raise ValueError("flow_eps and grad_norm cannot be combined")
+            # coarse grid (one node per 16 px), upsampled bicubically: a smooth sub-pixel warp
+            h, w = images.shape[-2:]
+            flow_free = torch.zeros(n, 2, max(2, h // 16), max(2, w // 16), device=dev, requires_grad=True)
+            groups.append({"params": [flow_free], "lr": p.flow_lr})
+        opt = torch.optim.Adam(groups)
+        emap = eps_map(images, p.eps, p.eps_floor, p.texture_ref)
+        smooth = 1 - texture_map(images, p.texture_ref) if p.shade_weight > 0 else None
+        lp_net = lpips_model(dev) if p.lpips_weight > 0 else None
+        area = mask[:, 0].sum(dim=(1, 2))
 
         best_delta = torch.zeros_like(images)
         best_loss = torch.full((n,), float('inf'), device=dev)
@@ -417,7 +522,10 @@ class Cloaker:
         views = 1 + p.eot_samples
         for step in range(p.steps):
             clean_step = step % views == 0
-            x = (images + self._perturbation(delta, mask)).clamp(0, 255)
+            base = images
+            if flow_free is not None:
+                base = warp_flow(images, smooth_flow(flow_free, images.shape[-2:]).clamp(-p.flow_eps, p.flow_eps) * mask)
+            x = (base + self._perturbation(delta, mask)).clamp(0, 255)
             self._set_token_mask(0.0 if clean_step else p.token_mask)
             if clean_step:
                 aligned = warp_to_template(x / 255.0, clean_m)
@@ -427,11 +535,19 @@ class Cloaker:
                 aligned = self._augment(warp_to_template(x / 255.0, m), rng)
             terms, cosines = self._per_model_loss(aligned, target_vecs, self_vecs)
             feat_loss = terms.sum(dim=1)
-            d = dssim(x, images, mask)
+            # the pixel budgets govern the additive part; the warp has its own bound (flow_eps)
+            d = dssim(x, base, mask)
             penalty = p.dssim_weight * F.relu(d - p.dssim_budget)
             if p.chroma_weight > 0:
-                chroma = (chroma_magnitude(x - images) * mask[:, 0]).sum(dim=(1, 2)) / mask[:, 0].sum(dim=(1, 2))
+                chroma = (chroma_magnitude(x - base) * mask[:, 0]).sum(dim=(1, 2)) / area
                 penalty = penalty + p.chroma_weight * chroma / 255.0
+            if p.shade_weight > 0:
+                shade = (darkening_lines(x - base, smooth).mul(mask[:, 0]).sum(dim=(1, 2)) / area + 1e-6).sqrt()
+                penalty = penalty + p.shade_weight * shade / 255.0
+            lp = None
+            if lp_net is not None:
+                lp = lpips_distance(lp_net, x, images)
+                penalty = penalty + p.lpips_weight * F.relu(lp - p.lpips_budget)
             act = active.float()
 
             opt.zero_grad()
@@ -440,18 +556,24 @@ class Cloaker:
             else:
                 ((feat_loss + penalty) * act).sum().backward()
             delta.grad.mul_(act.view(-1, 1, 1, 1))
+            if flow_free is not None:
+                flow_free.grad.mul_(act.view(-1, 1, 1, 1))
             if 0 < p.patchout < 1:
                 delta.grad.mul_(_block_dropout_mask(delta.grad, p.patchout, rng))
             opt.step()
             with torch.no_grad():
                 if math.isfinite(p.chroma_eps):
                     delta.copy_(clamp_chroma(delta, p.chroma_eps))
-                delta.clamp_(-p.eps, p.eps)
+                delta.copy_(torch.maximum(torch.minimum(delta, emap), -emap))
                 delta.mul_(mask)
+                if flow_free is not None:
+                    flow_free.clamp_(-p.flow_eps, p.flow_eps)
                 steps_run[active] = step + 1
                 if clean_step:
                     # best-so-far bookkeeping on the clean alignment, within budget only
                     within = d.detach() <= p.dssim_budget * 1.05
+                    if lp is not None and p.lpips_budget > 0:
+                        within = within & (lp.detach() <= p.lpips_budget * 1.05)
                     improved = active & within & (feat_loss.detach() < best_loss)
                     best_loss = torch.where(improved, feat_loss.detach(), best_loss)
                     best_cos[improved] = cosines.detach()[improved]
@@ -474,8 +596,8 @@ class Cloaker:
         never = torch.isinf(best_loss)
         if never.any():
             # no step landed inside the budget: return the last perturbation
-            best_delta[never] = self._perturbation(delta.detach(), mask)[never]
             with torch.no_grad():
+                best_delta[never] = (x - images).detach()[never]
                 x = (images + best_delta).clamp(0, 255)
                 _, cosines = self._feature_loss(warp_to_template(x / 255.0, clean_m), target_vecs)
                 best_cos[never] = cosines[never]

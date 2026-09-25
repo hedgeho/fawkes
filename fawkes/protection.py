@@ -11,6 +11,7 @@ import numpy as np
 
 from fawkes.align import make_crop, paste_back, template_crop
 from fawkes.cloak import CloakParams, Cloaker
+from fawkes.detect import DetectedFace
 from fawkes.utils import dump_image, filter_image_paths
 
 # steps / eps (L-inf, 0-255) / dssim_budget: perturbation size; eot_samples: robustness views per
@@ -35,13 +36,13 @@ MODES = {
 class Fawkes(object):
     def __init__(self, mode="mid", target_dir=None, models=None, steps=None, eps=None, dssim_budget=None,
                  eot_samples=None, stop_cos=None, threads=None, seed=0, batch_size=8, verbose=False,
-                 device=None, **cloak_params):
-        """`cloak_params`: any further CloakParams field (self_weight, laggard, lr, patience, ...)."""
+                 device=None, target_strategy="near", target_exclude=(), **cloak_params):
+        """`target_dir`: photos of the person to mimic; None picks a target per person from the pool
+        (fawkes.target_pool) with `target_strategy` ('near' or 'far'), never one named in `target_exclude`.
+        `cloak_params`: any further CloakParams field (self_weight, laggard, lr, patience, ...)."""
         if mode not in MODES:
             raise ValueError("mode must be one of {}, got {!r}".format(", ".join(repr(m) for m in MODES), mode))
-        if target_dir is None:
-            raise ValueError("target_dir is required: a directory with a few photos of the person to mimic")
-        if not os.path.isdir(target_dir):
+        if target_dir is not None and not os.path.isdir(target_dir):
             raise ValueError("target_dir {!r} is not a directory".format(target_dir))
         params = dict(MODES[mode])
         for name, value in (("steps", steps), ("eps", eps), ("dssim_budget", dssim_budget),
@@ -69,6 +70,9 @@ class Fawkes(object):
         self.device = device or default_device()
         self.mode = mode
         self.target_dir = target_dir
+        self.target_strategy = target_strategy
+        self.target_exclude = tuple(target_exclude)
+        self.chosen_targets = []  # (group size, reason) per auto-chosen target, for logs and the harness
         self.model_keys = params.pop("models")
         self.params = CloakParams(seed=seed, batch_size=batch_size, **params)
         self.verbose = verbose
@@ -76,6 +80,8 @@ class Fawkes(object):
         self._detector = None
         self._cloaker = None
         self._target = None
+        self._age_model = None
+        self._pool = None
 
     # models are loaded lazily so that argument errors surface before any download starts
     @property
@@ -100,6 +106,22 @@ class Fawkes(object):
             self._target = get_or_build_target(self.target_dir, self.model_keys, self.detector, self.cloaker)
         return self._target
 
+    def auto_targets(self, faces, images, crops, embeddings):
+        """Group the faces into people and choose a pool target for each: [(indices, target)]."""
+        from fawkes.target_pool import AgeGender, Pool, describe, group_faces, select
+        if self._pool is None:
+            self._pool = Pool.load()
+            self._age_model = AgeGender()
+        out = []
+        for idx in group_faces(embeddings, self.model_keys[0]):
+            person = describe([faces[i] for i in idx], [images[i] for i in idx], [crops[i] for i in idx],
+                              self.cloaker, self._age_model, {k: v[idx] for k, v in embeddings.items()})
+            i, reason = select(self._pool, person, self.model_keys, self.target_strategy, self.target_exclude)
+            print("Target for {} face(s): {}".format(len(idx), reason))
+            self.chosen_targets.append((len(idx), reason))
+            out.append((idx, self._pool.target(i, self.model_keys)))
+        return out
+
     def set_target_dir(self, target_dir):
         """Switch to another target identity, keeping the loaded models."""
         if not os.path.isdir(target_dir):
@@ -119,37 +141,49 @@ class Fawkes(object):
             print("No images in the directory")
             return 3
 
-        crops, owner = [], []
+        crops, owner, found = [], [], []
         for i, (path, img) in enumerate(zip(image_paths, images)):
             if no_align:
-                faces = [None]
-                crops.append(template_crop(img))
+                crop = template_crop(img)
+                crops.append(crop)
                 owner.append(i)
+                h, w = img.shape[:2]
+                found.append(DetectedFace(bbox=np.array([0, 0, w, h], np.float32), kps=crop.kps, score=1.0))
                 continue
             faces = self.detector.detect(img)
             print("Find {} face(s) in {}".format(len(faces), os.path.basename(path)))
             for face in faces:
                 crops.append(make_crop(img, face.bbox, face.kps))
                 owner.append(i)
+                found.append(face)
         if not crops:
             print("No face detected. ")
             return 2
 
-        target = self.target
-        warning = similarity_warning(self.cloaker.embed(crops), target)
-        if warning:
-            print(warning)
+        embeddings = self.cloaker.embed(crops)
+        if self.target_dir is None:
+            plan = self.auto_targets(found, [images[i] for i in owner], crops, embeddings)
+        else:
+            target = self.target
+            warning = similarity_warning(embeddings, target)
+            if warning:
+                print(warning)
+            plan = [(list(range(len(crops))), target)]
 
-        result = self.cloaker.cloak(crops, target)
-        if debug:
-            for i, crop in enumerate(crops):
-                print("face {} ({}): steps {} dssim {:.4f} cos {}".format(
-                    i, os.path.basename(image_paths[owner[i]]), result.steps[i], result.dssim[i],
-                    " ".join("{}={:.2f}".format(k, c) for k, c in zip(result.models, result.cos[i]))))
-        print("protection cost {:.1f} s ({:.1f} s/face)".format(result.seconds, result.seconds / len(crops)))
+        cloaked, seconds = [None] * len(crops), 0.0
+        for idx, target in plan:
+            result = self.cloaker.cloak([crops[i] for i in idx], target)
+            seconds += result.seconds
+            for j, i in enumerate(idx):
+                cloaked[i] = result.images[j]
+                if debug:
+                    print("face {} ({}): steps {} dssim {:.4f} cos {}".format(
+                        i, os.path.basename(image_paths[owner[i]]), result.steps[j], result.dssim[j],
+                        " ".join("{}={:.2f}".format(k, c) for k, c in zip(result.models, result.cos[j]))))
+        print("protection cost {:.1f} s ({:.1f} s/face)".format(seconds, seconds / len(crops)))
 
         outputs = {}
-        for crop, cloaked, i in zip(crops, result.images, owner):
+        for crop, cloaked, i in zip(crops, cloaked, owner):
             base = outputs.get(i, images[i])
             outputs[i] = paste_back(base, crop, cloaked)
         for i, out in outputs.items():
@@ -174,8 +208,13 @@ def main(*argv):
                                                  "recognition models see a chosen target person instead.")
     parser.add_argument('--directory', '-d', type=str, default='imgs/',
                         help='the directory that contains images to run protection')
-    parser.add_argument('--target-dir', '-t', type=str, required=True,
-                        help='directory with a few photos (one face each) of the person to mimic')
+    parser.add_argument('--target-dir', '-t', type=str, default=None,
+                        help='directory with a few photos (one face each) of the person to mimic (default: pick '
+                             'a different person of similar age, sex and skin tone from the target pool, '
+                             'see `python -m fawkes.target_pool`)')
+    parser.add_argument('--target-strategy', choices=['near', 'far'], default='near',
+                        help="automatic target: the most ('near') or least ('far') similar of the matched "
+                             "pool identities")
     parser.add_argument('--mode', '-m', choices=list(MODES), default='mid',
                         help='tradeoff between perturbation size, run time and protection strength')
     parser.add_argument('--models', type=str, default=None,
@@ -211,7 +250,7 @@ def main(*argv):
     image_paths = [path for path in glob.glob(os.path.join(args.directory, "*"))
                    if "_cloaked" not in os.path.basename(path)]
 
-    protector = Fawkes(mode=args.mode, target_dir=args.target_dir,
+    protector = Fawkes(mode=args.mode, target_dir=args.target_dir, target_strategy=args.target_strategy,
                        models=args.models.split(",") if args.models else None,
                        steps=args.steps, eps=args.eps, dssim_budget=args.th,
                        eot_samples=0 if args.no_eot else None, threads=args.threads, seed=args.seed,

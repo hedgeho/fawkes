@@ -105,6 +105,22 @@ CONFIGS=(
   "T20|high|--cloak-arg chroma_weight=30 --cloak-arg eps=20|jpeg"
   "T21|high|--cloak-arg chroma_weight=60 --cloak-arg eps=20|"
   "T22|mid|--cloak-arg chroma_weight=30 --cloak-arg eps=24|"
+  # Round 11 (2026-09-25): postable cloaks. On real photos the decision-12 cloaks read as ageing: dark
+  # wrinkle-scale contours around eyes, nose and mouth. Each visibility lever alone on mid: a matched
+  # target from the pool (same sex, similar age and skin tone; near or far in feature space), an LPIPS
+  # penalty, a texture-masked bound (smooth skin gets eps * eps_floor), a penalty on darkening
+  # wrinkle-scale lines, and a sub-pixel warp that carries part of the attack. S0 is the same-day baseline.
+  "S0|mid||"
+  "S1|mid|--target-strategy near|"
+  "S2|mid|--target-strategy far|"
+  "S3|mid|--cloak-arg lpips_weight=5|"
+  "S4|mid|--cloak-arg lpips_weight=20|"
+  "S5|mid|--cloak-arg eps_floor=0.5|"
+  "S6|mid|--cloak-arg eps_floor=0.25|"
+  "S7|mid|--cloak-arg shade_weight=30|"
+  "S8|mid|--cloak-arg shade_weight=100|"
+  "S9|mid|--cloak-arg flow_eps=1.0|"
+  "S10|mid|--cloak-arg flow_eps=1.0 --cloak-arg eps=16|"
 )
 want=("$@")
 for cfg in "${CONFIGS[@]}"; do

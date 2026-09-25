@@ -60,8 +60,7 @@ def test_dump_image_roundtrip(tmp_path):
 def test_argument_validation_happens_before_any_model_loads(tmp_path):
     with pytest.raises(ValueError, match="mode must be one of"):
         Fawkes(mode="min", target_dir=str(tmp_path))
-    with pytest.raises(ValueError, match="target_dir is required"):
-        Fawkes(mode="low")
+    assert Fawkes(mode="low").target_dir is None  # automatic target from the pool
     with pytest.raises(ValueError, match="not a directory"):
         Fawkes(mode="low", target_dir=str(tmp_path / "missing"))
     with pytest.raises(ValueError, match="unknown surrogate"):
