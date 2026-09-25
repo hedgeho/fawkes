@@ -326,7 +326,7 @@ class EmbeddingCache:
     """sqlite cache: (evaluator, sha256 of file bytes) -> embedding blob, or NULL when no face was found."""
 
     def __init__(self, path):
-        self.db = sqlite3.connect(path)
+        self.db = sqlite3.connect(path, timeout=600)  # several evaluation jobs may share one cache
         self.db.execute("CREATE TABLE IF NOT EXISTS emb (evaluator TEXT, sha TEXT, vec BLOB, PRIMARY KEY (evaluator, sha))")
 
     def embed_files(self, evaluator, paths):
@@ -573,6 +573,10 @@ def parse_args(argv=None):
     ap.add_argument("--smoke", action="store_true", help="2+2 identities, 4 train + 2 test photos each")
     ap.add_argument("--workdir", default=DEFAULT_WORKDIR)
     ap.add_argument("--skip-cloak", action="store_true", help="reuse the *_cloaked.png files already in the workdir")
+    ap.add_argument("--cloak-only", action="store_true",
+                    help="cloak and stop (GPU job); evaluate later with --skip-cloak on a CPU node")
+    ap.add_argument("--cache", default=None, help="embedding cache file (default: <workdir>/embeddings.sqlite); "
+                    "entries are keyed by file hash, so workdirs may share one")
     ap.add_argument("--seconds-per-photo", type=float, default=None,
                     help="with --skip-cloak: record this previously measured cloaking time in the results")
     args = ap.parse_args(argv)
@@ -602,13 +606,23 @@ def main(argv=None):
     to_cloak = [photo_path(workdir, i, "train", n) for i in split.protected for n in range(len(i.train))]
     path_targets = {photo_path(workdir, i, "train", n): target_dirs[i.name]
                     for i in split.protected for n in range(len(i.train))}
+    info_path = os.path.join(workdir, "cloak_info.json")
     if args.skip_cloak:
         seconds_per_photo = args.seconds_per_photo
         uncloaked = [p for p in to_cloak if not os.path.exists(cloaked_path(p))]
+        if os.path.exists(info_path):  # written by an earlier --cloak-only run
+            info = json.load(open(info_path))
+            seconds_per_photo = seconds_per_photo or info["seconds_per_photo"]
+            args.chosen_targets = info["chosen_targets"]
     else:
         print(f"cloaking {len(to_cloak)} photos with {args.cloaker} (mode {args.mode}) ...")
         seconds_per_photo, uncloaked = run_cloaker(args, to_cloak, path_targets)
         print(f"cloaked in {fmt(seconds_per_photo, 1)} s/photo; {len(uncloaked)} photos got no cloak")
+        with open(info_path, "w") as f:
+            json.dump({"seconds_per_photo": seconds_per_photo, "chosen_targets": args.chosen_targets}, f)
+        if args.cloak_only:
+            print(f"cloak only: evaluate later with --skip-cloak --workdir {args.workdir}")
+            return None
 
     quality = image_quality([(p, cloaked_path(p)) for p in to_cloak])
     quality.update(perceptual_quality([(p, cloaked_path(p)) for p in to_cloak]))
@@ -618,7 +632,7 @@ def main(argv=None):
     if args.jpeg is not None:
         cloaked_files = {p: jpeg_reencode(c, args.jpeg) for p, c in cloaked_files.items()}
 
-    cache = EmbeddingCache(os.path.join(workdir, "embeddings.sqlite"))
+    cache = EmbeddingCache(args.cache or os.path.join(workdir, "embeddings.sqlite"))
     results = {"args": vars(args), "split": asdict(split), "quality": quality, "evaluators": {},
                "chosen_targets": args.chosen_targets}
     for key in args.evaluator:

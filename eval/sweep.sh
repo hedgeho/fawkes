@@ -123,18 +123,28 @@ CONFIGS=(
   "S10|mid|--cloak-arg flow_eps=1.0 --cloak-arg eps=16|"
 )
 want=("$@")
+# SWEEP_STAGE=all (default): cloak and evaluate each configuration in one job, sharing $WORK.
+# SWEEP_STAGE=cloak: only cloak, each configuration in $WORK/<label> (the GPU part);
+# SWEEP_STAGE=eval: only evaluate those, sharing the embedding cache $WORK/embeddings.sqlite (CPU only).
+STAGE="${SWEEP_STAGE:-all}"
 for cfg in "${CONFIGS[@]}"; do
   IFS='|' read -r label mode extra jpeg <<<"$cfg"
   if [ ${#want[@]} -gt 0 ] && [[ ! " ${want[*]} " == *" $label "* ]]; then continue; fi
-  echo "=== $label $mode $extra  $(date)"
+  echo "=== $label $mode $extra ($STAGE)  $(date)"
+  wd="$WORK"; stage_args=()
+  case "$STAGE" in
+    cloak) wd="$WORK/$label"; stage_args=(--cloak-only) ;;
+    eval) wd="$WORK/$label"; stage_args=(--skip-cloak --cache "$WORK/embeddings.sqlite") ;;
+  esac
   # shellcheck disable=SC2086
   uv run python eval/harness.py --cloaker v2 --mode "$mode" --batch-size 16 --tag "$label" \
-    --workdir "$WORK" "${EV[@]}" $extra
-  if [ "$jpeg" = "jpeg" ]; then
+    --workdir "$wd" "${EV[@]}" "${stage_args[@]}" $extra
+  if [ "$jpeg" = "jpeg" ] && [ "$STAGE" != "cloak" ]; then
     echo "=== $label jpeg75  $(date)"
+    cache_args=(); [ "$STAGE" = "eval" ] && cache_args=(--cache "$WORK/embeddings.sqlite")
     # shellcheck disable=SC2086
     uv run python eval/harness.py --cloaker v2 --mode "$mode" --tag "$label" --jpeg 75 --skip-cloak \
-      --workdir "$WORK" "${EV[@]}" $extra
+      --workdir "$wd" "${EV[@]}" "${cache_args[@]}" $extra
   fi
 done
 echo "=== done $(date)"
