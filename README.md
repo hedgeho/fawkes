@@ -67,6 +67,23 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
   change of the face's shading. On an 8-core CPU without a GPU, `low` takes about 35 s per face; the
   other modes take several minutes (not measured since the step counts were raised).
 
+  ![Three people, each shown clean and cloaked in every mode, with a face classifier's output under every photo](docs/img/modes.jpg)
+
+  Each column is one person (Barack Obama from Wikimedia Commons, and two people from
+  [LFW](https://vis-www.cs.umass.edu/lfw/)), and each row is a mode. Every tile is one of the three
+  photos that person "posts", cloaked in that row's mode with the automatic target. The lines under a tile
+  are the output of a simple face classifier: buffalo_l embeddings, the mean embedding of a person as the
+  reference, and a cosine threshold of 0.35.
+  - *this photo*: whether the posted photo still matches the person, with a reference built from other,
+    clean photos of them.
+  - *trained on these*: how many of those clean photos match a reference built from the row's three posted
+    photos, as a scraper would build it. This is the protection Fawkes aims for.
+
+  All the cloaked rows find none, but this setting is easy for the cloak: the scraper sees only cloaked
+  photos of you, and the classifier is a plain centroid. With stronger recognisers and a trained
+  classifier, the protection is partial, lowest in `subtle` (see [Evaluation](#evaluation)). Made
+  with `eval/illustrate.py`.
+
   Every mode also penalises what is left of your own identity in the cloaked face
   (`--self-weight`, see [docs/DECISIONS.md](docs/DECISIONS.md#10-penalise-the-residual-similarity-to-the-own-face-not-only-the-distance-to-the-target)).
   `mid` and `high` penalise the colour part of the cloak, which is what shows as reddish or
