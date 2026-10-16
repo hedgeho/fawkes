@@ -98,6 +98,20 @@ pixels the cloaker changed, which is the face crop for Fawkes and is the region 
 budget (0.012 in `low` and `mid`, 0.006 in `subtle`, 0.017 in `high`) refers to. **s/photo** is wall-clock seconds per cloaked photo on this
 machine.
 
+**LPIPS face** is LPIPS (AlexNet) over the same box. **age shift** is the apparent age of the cloaked
+face minus that of the clean one, in years, mean and 90th percentile, by insightface genderage. The
+cloak's age penalty optimises against genderage, so for any mode with `age_weight > 0` that column
+is not held out. **MiVOLO age shift** (mean, 10th and 90th percentile; negative = looks younger) is
+the held-out judge: MiVOLO v2 (VOLO transformer, Apache-2.0 weights; Kuprashevich et al.,
+[2403.02302](https://arxiv.org/abs/2403.02302)), face input only, from the ONNX export
+`Sam-Apostel/mivolo-v2-age-onnx` at a pinned revision. `tests/test_harness.py` checks the wrapper
+against the official model, which was run once on `tests/data/aligned_112.png` with the MiVOLO source
+at commit `37475e3f` on `PYTHONPATH` (its `setup.py` needs the removed `pkg_resources`) and
+`uv run --isolated --python 3.11 --with transformers==4.51.0 --with accelerate==1.8.1 --with
+torch==2.5.1 --with torchvision==0.20.1 --with timm==0.8.13.dev0 --with ultralytics==8.1.0 --with
+scipy --with lapx --with opencv-python-headless --with 'numpy<2'`, following the model card's quick
+start with `body_input` from `images=[None]`. On nine LFW face boxes the two agree within 0.001 years.
+
 ## Caveat: evaluators and surrogates must be disjoint
 
 The cloak is optimised against a *surrogate* ensemble. Radiya-Dixit and Tramer (ICLR 2022) showed

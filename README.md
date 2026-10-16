@@ -249,7 +249,8 @@ Model licences
 | lvface_b | LVFace-B, Glint360K | [ByteDance LVFace](https://github.com/bytedance/LVFace) | non-commercial research |
 | lvface_l | LVFace-L (ViT-L), Glint360K | [ByteDance LVFace](https://github.com/bytedance/LVFace) | non-commercial research |
 | lvface_s | LVFace-S (ViT-S), Glint360K | [ByteDance LVFace](https://github.com/bytedance/LVFace) | non-commercial research |
-| evaluators | w600k_r50, glintr100, AdaFace ViT-B, LVFace-T | InsightFace, CVLface, LVFace | research |
+| evaluators | w600k_r50, glintr100, AdaFace ViT-B, LVFace-T, ViT-L WebFace42M | InsightFace, CVLface, LVFace | research |
+| held-out age judge (evaluation only) | MiVOLO v2 | [MiVOLO](https://huggingface.co/iitolstykh/mivolo_v2), ONNX export | Apache-2.0 |
 
 Development
 -----------

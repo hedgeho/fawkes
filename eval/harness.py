@@ -444,10 +444,68 @@ def image_quality(pairs):
     return out
 
 
+# Held-out age judge: MiVOLO v2 (VOLO transformer, Kuprashevich et al. 2024; weights Apache-2.0),
+# age output only, as an ONNX export of iitolstykh/mivolo_v2. tests/test_harness.py checks it against
+# the official PyTorch model (eval/README.md has the recipe). Neither its architecture nor its data
+# is shared with insightface genderage, which the cloak's age penalty optimises against.
+MIVOLO_REPO = "Sam-Apostel/mivolo-v2-age-onnx"
+MIVOLO_FILE = "mivolo_v2_age.onnx"
+MIVOLO_REVISION = "8eb4cd8f5dd4bd28df2c9a43b24bc54d6d139d36"
+MIVOLO_SHA256 = "2db5e05be33b3f120518a86f29a4a65eb0a01c2967219b8787a7dead9b796951"
+
+
+class MiVoloAge:
+    """Apparent age of a face crop with MiVOLO v2, face input only (MiVOLO's own 'no body' input)."""
+
+    SIZE = 384
+    MEAN = np.array([0.485, 0.456, 0.406], np.float32)
+    STD = np.array([0.229, 0.224, 0.225], np.float32)
+
+    def __init__(self):
+        import onnxruntime as ort
+        from huggingface_hub import hf_hub_download
+        from fawkes.models import model_dir, onnx_session_options, sha256sum
+        path = model_dir() / "mivolo_v2_age" / MIVOLO_FILE
+        if not path.exists():
+            path = hf_hub_download(MIVOLO_REPO, MIVOLO_FILE, revision=MIVOLO_REVISION,
+                                   local_dir=str(model_dir() / "mivolo_v2_age"))
+            if sha256sum(path) != MIVOLO_SHA256:
+                os.remove(path)
+                raise RuntimeError(f"sha256 mismatch for {MIVOLO_FILE}; file removed")
+        self.sess = ort.InferenceSession(str(path), onnx_session_options(), providers=["CPUExecutionProvider"])
+        self.input = self.sess.get_inputs()[0].name
+        self.no_body = np.broadcast_to((-self.MEAN / self.STD)[:, None, None], (3, self.SIZE, self.SIZE))
+
+    def letterbox(self, rgb):
+        """MiVOLO's class_letterbox: scale the longer side to SIZE, pad with black, centred."""
+        import cv2
+        h, w = rgb.shape[:2]
+        r = min(self.SIZE / h, self.SIZE / w)
+        nw, nh = int(round(w * r)), int(round(h * r))
+        if (nw, nh) != (w, h):
+            rgb = cv2.resize(rgb, (nw, nh), interpolation=cv2.INTER_LINEAR)
+        dw, dh = (self.SIZE - nw) / 2, (self.SIZE - nh) / 2
+        top, bottom, left, right = (int(round(dh - 0.1)), int(round(dh + 0.1)),
+                                    int(round(dw - 0.1)), int(round(dw + 0.1)))
+        return cv2.copyMakeBorder(rgb, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+
+    def predict_crop(self, rgb_crop):
+        x = (self.letterbox(np.ascontiguousarray(rgb_crop)).astype(np.float32) / 255.0 - self.MEAN) / self.STD
+        blob = np.concatenate([x.transpose(2, 0, 1), self.no_body])[None].astype(np.float32)
+        return float(self.sess.run(None, {self.input: blob})[0].reshape(-1)[0])
+
+    def predict(self, rgb, bbox):
+        """Age in years of the face in `bbox` (x0, y0, x1, y1) of an RGB photo."""
+        h, w = rgb.shape[:2]
+        x0, y0, x1, y1 = [int(round(v)) for v in bbox]
+        return self.predict_crop(rgb[max(y0, 0):min(y1, h), max(x0, 0):min(x1, w)])
+
+
 def perceptual_quality(pairs):
     """LPIPS (AlexNet) over the face box of the change and the apparent-age shift of the largest face
-    (insightface genderage on the clean face's box, in years, cloaked minus clean). Genderage is not
-    a held-out measure once a cloak penalises age; LPIPS is not once a cloak penalises LPIPS."""
+    (on the clean face's box, in years, cloaked minus clean) by insightface genderage and by the
+    held-out MiVOLO v2. Genderage is not a held-out measure once a cloak penalises age; LPIPS is not
+    once a cloak penalises LPIPS."""
     import torch
     from fawkes.detect import Detector
     from fawkes.target_pool import AgeGender
@@ -456,8 +514,8 @@ def perceptual_quality(pairs):
         net = lpips_model(torch.device("cpu"))
     except ImportError:
         net = None
-    detector, ages = Detector(), AgeGender()
-    lp, d_age = [], []
+    detector, ages, mivolo = Detector(), AgeGender(), MiVoloAge()
+    lp, d_age, d_mivolo = [], [], []
     for clean_p, cloaked_p in pairs:
         a = np.asarray(Image.open(clean_p).convert("RGB"))
         b = np.asarray(Image.open(cloaked_p).convert("RGB"))
@@ -466,6 +524,7 @@ def perceptual_quality(pairs):
         faces = detector.detect(a)
         if faces:
             d_age.append(ages.predict(b, faces[0].bbox)[0] - ages.predict(a, faces[0].bbox)[0])
+            d_mivolo.append(mivolo.predict(b, faces[0].bbox) - mivolo.predict(a, faces[0].bbox))
         if net is not None:
             ys, xs = np.where((a != b).any(axis=-1))
             box = np.s_[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
@@ -474,8 +533,10 @@ def perceptual_quality(pairs):
             with torch.no_grad():
                 lp.append(float(lpips_distance(net, tb, ta)[0]))
     mean = lambda v: float(np.mean(v)) if len(v) else None
-    return {"lpips_face": mean(lp), "age_shift": mean(d_age),
-            "age_shift_p90": float(np.percentile(d_age, 90)) if d_age else None}
+    pct = lambda v, q: float(np.percentile(v, q)) if len(v) else None
+    return {"lpips_face": mean(lp), "age_shift": mean(d_age), "age_shift_p90": pct(d_age, 90),
+            "age_shift_mivolo": mean(d_mivolo), "age_shift_mivolo_p10": pct(d_mivolo, 10),
+            "age_shift_mivolo_p90": pct(d_mivolo, 90)}
 
 
 # --------------------------------------------------------------------------- evaluation
@@ -536,12 +597,15 @@ def markdown_report(results):
                      f"{fmt(m['frac_cloaked_below_threshold'])} | {m['n_undetected']} |")
     q = results["quality"]
     lines += ["", "| cloaked photos | uncloaked (cloaker gave no output) | PSNR dB | DSSIM photo | DSSIM face box "
-              "| chroma rms face | chroma LF rms face | luma LF rms face | LPIPS face | age shift (p90) | s/photo |",
-              "|---|---|---|---|---|---|---|---|---|---|---|",
+              "| chroma rms face | chroma LF rms face | luma LF rms face | LPIPS face | age shift (p90) "
+              "| MiVOLO age shift (p10, p90) | s/photo |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|",
               f"| {q['n_cloaked']} | {q['n_uncloaked']} | {fmt(q['psnr'], 1)} | {fmt(q['dssim'], 4)} | "
               f"{fmt(q['dssim_face'], 4)} | {fmt(q.get('chroma_rms_face'), 2)} | {fmt(q.get('chroma_lf_rms_face'), 2)} | "
               f"{fmt(q.get('luma_lf_rms_face'), 2)} | {fmt(q.get('lpips_face'), 3)} | "
-              f"{fmt(q.get('age_shift'), 1)} ({fmt(q.get('age_shift_p90'), 1)}) | {fmt(q['seconds_per_photo'], 1)} |"]
+              f"{fmt(q.get('age_shift'), 1)} ({fmt(q.get('age_shift_p90'), 1)}) | "
+              f"{fmt(q.get('age_shift_mivolo'), 1)} ({fmt(q.get('age_shift_mivolo_p10'), 1)}, "
+              f"{fmt(q.get('age_shift_mivolo_p90'), 1)}) | {fmt(q['seconds_per_photo'], 1)} |"]
     if results.get("chosen_targets"):
         lines += ["", "Targets: " + "; ".join(f"{k}: {', '.join(v)}" for k, v in results["chosen_targets"].items())]
     return "\n".join(lines)

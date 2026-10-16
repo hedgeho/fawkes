@@ -1,4 +1,5 @@
-"""Fast tests for eval/harness.py; none of them download data or load a model."""
+"""Fast tests for eval/harness.py; none of them download data, and only the MiVOLO parity test
+loads a model (skipped unless its weights are already in fawkes.models.model_dir())."""
 import importlib.util
 import os
 
@@ -139,3 +140,16 @@ def test_parse_cloak_args():
     assert harness.parse_cloak_args(["steps=120", "self_weight=1.0", "models=a,b", "name=x"]) == {
         "steps": 120, "self_weight": 1.0, "models": ["a", "b"], "name": "x"}
     assert harness.parse_cloak_args(None) == {}
+
+
+MIVOLO_PATH = os.path.join(harness.ROOT, "fawkes", "model", "mivolo_v2_age", harness.MIVOLO_FILE)
+
+
+@pytest.mark.skipif(not os.path.exists(MIVOLO_PATH) and not os.environ.get("FAWKES_TEST_DOWNLOAD"),
+                    reason="MiVOLO weights not downloaded")
+def test_mivolo_matches_upstream():
+    """Reference: the official iitolstykh/mivolo_v2 PyTorch model (float32, transformers 4.51,
+    MiVOLO source at commit 37475e3f, image processor on cv2.imread of the fixture, body input
+    None), age_output = 52.0868. The recipe is in eval/README.md."""
+    rgb = np.asarray(Image.open(os.path.join(os.path.dirname(__file__), "data", "aligned_112.png")).convert("RGB"))
+    assert abs(harness.MiVoloAge().predict_crop(rgb) - 52.0868) < 0.01
