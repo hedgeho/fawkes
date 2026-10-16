@@ -8,7 +8,7 @@
 # (python -m fawkes.models download); the device follows FAWKES_DEVICE / CUDA availability.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-EV=(--evaluator buffalo_l --evaluator antelopev2 --evaluator adaface_vit_b --evaluator lvface_t)
+EV=(--evaluator buffalo_l --evaluator antelopev2 --evaluator adaface_vit_b --evaluator lvface_t --evaluator vit_l_wf42m)
 WORK="${SWEEP_WORKDIR:-eval/work/sweep}"
 
 # label | mode | extra harness arguments (cloak overrides and flags) | "jpeg" to also evaluate a JPEG-75 copy
