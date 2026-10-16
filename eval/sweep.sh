@@ -166,6 +166,15 @@ CONFIGS=(
   "M3|mid|--target-strategy near --cloak-arg dssim_budget=0.006 --cloak-arg eps=12 --cloak-arg steps=120 --cloak-arg stop_cos=0.99|"
   "M4|mid|--target-strategy far --cloak-arg dssim_budget=0.006 --cloak-arg eps=12 --cloak-arg steps=120 --cloak-arg stop_cos=0.99 --cloak-arg age_weight=1|"
   "M5|mid|--target-strategy far --cloak-arg dssim_budget=0.008 --cloak-arg eps=16 --cloak-arg steps=120 --cloak-arg stop_cos=0.99|"
+  # Round 17 (2026-10-16): the decision-13 modes with one automatic target per protected identity (the
+  # harness used to let Fawkes split an identity into several embedding clusters, each with its own
+  # target), JPEG 75 for every mode, and a second identity split (seed 1) to measure the noise.
+  "F0|subtle|--target-strategy far|jpeg"
+  "F1|mid|--target-strategy far|jpeg"
+  "F2|high|--target-strategy far|jpeg"
+  "F3|subtle|--target-strategy far --seed 1|jpeg"
+  "F4|mid|--target-strategy far --seed 1|jpeg"
+  "F5|high|--target-strategy far --seed 1|jpeg"
 )
 want=("$@")
 # SWEEP_STAGE=all (default): cloak and evaluate each configuration in one job, sharing $WORK.
