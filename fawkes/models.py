@@ -25,6 +25,7 @@ lvface_s        bytedance/LVFace                 RGB     (x/255 - 0.5) / 0.5
 lvface_t        bytedance/LVFace (evaluator)     RGB     (x/255 - 0.5) / 0.5
 w600k_r50       insightface buffalo_l (ONNX)     RGB     (x - 127.5) / 127.5
 glintr100       insightface antelopev2 (ONNX)    RGB     (x - 127.5) / 127.5
+vit_l_wf42m     insightface arcface_torch (ONNX) RGB     (x - 127.5) / 127.5
 adaface_vit_b   CVLface (mk-minchul)             RGB     (x/255 - 0.5) / 0.5
 ==============  ===============================  ======  =====================
 
@@ -153,6 +154,17 @@ EVALUATORS: dict[str, ModelSpec] = {
               "'glint360k_cosface_r100_fp16_0.1' (IResNet-100, Glint360K, CosFace margin). "
               "public-data/insightface has no antelopev2; this mirror's sha256 equals the file inside "
               "the official antelopev2.zip GitHub release and ~/.insightface/models/antelopev2."),
+    ),
+    "vit_l_wf42m": ModelSpec(
+        key="vit_l_wf42m",
+        repo_id="kunkunlin1221/face-recognition_vit-l-pfc0.3-cosface-web42m",
+        filename="wf42m_pfc03_vit-l_fp32.onnx",
+        sha256="9aca053ceda88f822421990b8d8a5c2ae6f6ac81408b58eda82c0335707af8ee",
+        kind="onnx", arch="onnx", embed_dim=512,
+        licence="mirror tagged Apache-2.0; insightface arcface_torch model zoo: non-commercial research only",
+        note=("insightface arcface_torch 'wf42m_pfc03_40epoch_8gpu_vit_l' (ViT-L, WebFace42M, CosFace, "
+              "partial FC 0.3), ONNX mirror. The most distinct transformer evaluator: neither its data "
+              "nor its size is shared with a surrogate (LVFace is Glint360K, AdaFace ViT-B WebFace4M)."),
     ),
     "adaface_vit_b": ModelSpec(
         key="adaface_vit_b",

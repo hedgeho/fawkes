@@ -29,7 +29,7 @@ Flags:
 | `--tag` | none | label added to the results file name and the report header |
 | `--jpeg Q` | off | re-encode every cloaked photo as JPEG quality Q before the adversary sees it (a social-network upload) |
 | `--clean-gallery` | off | swap the probe's sides: train it on the clean test photos and ask it to recognise the cloaked train photos (see below) |
-| `--evaluator KEY` | `buffalo_l`, `antelopev2` | repeatable; built-in keys are insightface packs, any other key (`adaface_vit_b`, `lvface_t`) goes through `fawkes.models.load_evaluator` |
+| `--evaluator KEY` | `buffalo_l`, `antelopev2` | repeatable; built-in keys are insightface packs, any other key (`adaface_vit_b`, `lvface_t`, `vit_l_wf42m`) goes through `fawkes.models.load_evaluator` |
 | `--seed` | 0 | selects identities and the train/test split; everything is deterministic given the seed |
 | `--n-protected`, `--n-clean` | 10, 10 | identities that get cloaked / stay clean |
 | `--train-per-id`, `--test-per-id` | 10, 5 | photos per identity |

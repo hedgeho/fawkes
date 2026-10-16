@@ -15,7 +15,7 @@ with ``cv2.imwrite`` (so the PNG on disk is an ordinary RGB image).
 Each ``tests/data/ref_<key>.npy`` (raw, un-normalised 512-d float32) was computed ONCE on that
 PNG with the *upstream* inference path, never with the wrappers in ``fawkes.models``:
 
-* ``w600k_r50``, ``glintr100``: ``insightface.model_zoo.get_model(path).get_feat(cv2.imread(png))``
+* ``w600k_r50``, ``glintr100``, ``vit_l_wf42m``: ``insightface.model_zoo.get_model(path).get_feat(cv2.imread(png))``
   (``ArcFaceONNX``, insightface 2.0, onnxruntime CPU).
 * ``arcface_r100`` is arcface_torch ``ms1mv3_arcface_r100_fp16``, NOT the Glint360K R100 the plan
   first named: ``glint360k_cosface_r100_fp16_0.1`` is byte-for-byte the network exported as
