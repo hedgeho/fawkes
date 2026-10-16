@@ -39,10 +39,12 @@ MODES = {
 class Fawkes(object):
     def __init__(self, mode="mid", target_dir=None, models=None, steps=None, eps=None, dssim_budget=None,
                  eot_samples=None, stop_cos=None, threads=None, seed=0, batch_size=8, verbose=False,
-                 device=None, target_strategy="far", target_exclude=(), remember_targets=True, **cloak_params):
+                 device=None, target_strategy="far", target_exclude=(), remember_targets=True, one_person=False, **cloak_params):
         """`target_dir`: photos of the person to mimic; None picks a target per person from the pool
         (fawkes.target_pool) with `target_strategy` ('far', the default, or 'near'), never one named in `target_exclude`.
         `remember_targets`: keep each person's automatic target across runs (off in the harness).
+        `one_person`: every face passed to one run_protection call is the same person, so they share one
+        automatic target (default: group the faces into people by embedding).
         `cloak_params`: any further CloakParams field (self_weight, laggard, lr, patience, ...)."""
         if mode not in MODES:
             raise ValueError("mode must be one of {}, got {!r}".format(", ".join(repr(m) for m in MODES), mode))
@@ -77,6 +79,7 @@ class Fawkes(object):
         self.target_strategy = target_strategy
         self.target_exclude = tuple(target_exclude)
         self.remember_targets = remember_targets
+        self.one_person = one_person
         self.chosen_targets = []  # (group size, reason) per auto-chosen target, for logs and the harness
         self.model_keys = params.pop("models")
         self.params = CloakParams(seed=seed, batch_size=batch_size, **params)
@@ -121,7 +124,8 @@ class Fawkes(object):
             self._assignments = Assignments() if self.remember_targets else None
         key = self.model_keys[0]
         out = []
-        for idx in group_faces(embeddings, key):
+        groups = [list(range(len(faces)))] if self.one_person else group_faces(embeddings, key)
+        for idx in groups:
             person = describe([faces[i] for i in idx], [images[i] for i in idx], [crops[i] for i in idx],
                               self.cloaker, self._age_model, {k: v[idx] for k, v in embeddings.items()})
             known = self._assignments.lookup(key, person.embedding[key]) if self._assignments else None

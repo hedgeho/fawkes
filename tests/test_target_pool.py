@@ -87,3 +87,18 @@ def test_assignments_remember_a_person(tmp_path):
     assert again.lookup("k", _unit([1, 0.2, 0, 0])) == "p3"
     assert again.lookup("k", _unit([0, 1, 0, 0])) is None
     assert again.lookup("other", me) is None
+
+
+@pytest.mark.parametrize("one_person, n_targets", [(False, 2), (True, 1)])
+def test_auto_targets_one_person(monkeypatch, one_person, n_targets):
+    from fawkes.protection import Fawkes
+    pool = _pool()
+    monkeypatch.setattr(tp.Pool, "load", classmethod(lambda cls, *a, **k: pool))
+    monkeypatch.setattr(tp, "AgeGender", lambda: None)
+    monkeypatch.setattr(tp, "describe", lambda faces, *a, **k: _person(pool, 0))
+    f = Fawkes(mode="low", models=["adaface_ir101"], target_strategy="far", remember_targets=False,
+               one_person=one_person)
+    f._cloaker, f.model_keys = object(), ["a", "b"]  # describe is stubbed: no surrogate is loaded
+    a, b = _unit([1, 0, 0, 0]), _unit([0, 1, 0, 0])
+    plan = f.auto_targets([None] * 4, [None] * 4, [None] * 4, {"a": np.stack([a, b, a, b])})
+    assert len(plan) == n_targets and sorted(i for idx, _ in plan for i in idx) == [0, 1, 2, 3]

@@ -198,7 +198,8 @@ def parse_cloak_args(items):
 def cloak_v2(paths, args, target_dirs):
     """One Fawkes instance; the photos are grouped by target so the models load once. With a
     --target-strategy other than random, each protected identity's photos are cloaked together and
-    Fawkes picks their target from the pool (fawkes.target_pool), excluding every harness identity."""
+    Fawkes picks one target for them from the pool (fawkes.target_pool), excluding every harness identity;
+    one_person stops Fawkes from splitting an identity into several "people" by embedding."""
     if args.target_strategy != "random":
         from fawkes.protection import Fawkes
         by_identity = {}
@@ -206,7 +207,7 @@ def cloak_v2(paths, args, target_dirs):
             by_identity.setdefault(os.path.basename(os.path.dirname(os.path.dirname(p))), []).append(p)
         protector = Fawkes(mode=args.mode, target_dir=None, batch_size=args.batch_size,
                            target_strategy=args.target_strategy, target_exclude=args.harness_identities,
-                           remember_targets=False,
+                           remember_targets=False, one_person=True,
                            **parse_cloak_args(args.cloak_arg))
         for ident, group in by_identity.items():
             n_before = len(protector.chosen_targets)
