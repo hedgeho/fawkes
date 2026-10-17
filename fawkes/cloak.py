@@ -45,7 +45,7 @@ class CloakParams:
     lpips_weight: float = 0.0  # >0: penalty per unit of LPIPS (AlexNet) above `lpips_budget`; needs the lpips package
     lpips_budget: float = 0.0
     age_weight: float = 0.0  # >0: penalty per decade of apparent age added beyond `age_margin`
-    age_models: str = "genderage"  # comma-separated age estimators, penalty averaged: genderage, fairface
+    age_models: str = "genderage"  # age estimators separated by ',' or '+', penalty averaged: genderage, fairface
     age_margin: float = 1.0  # years of apparent ageing allowed for free
     age_symmetric: bool = False  # penalise rejuvenation beyond the margin too, not only ageing
     flow_eps: float = 0.0  # >0: add a smooth sub-pixel displacement field bounded to this many crop pixels
@@ -407,7 +407,7 @@ class Cloaker:
         if getattr(self, "_ages", None) is None:
             self._ages = {}
         out = []
-        for name in [m.strip() for m in self.params.age_models.split(",") if m.strip()]:
+        for name in [m.strip() for m in self.params.age_models.replace("+", ",").split(",") if m.strip()]:
             if name not in self.AGE_MODELS:
                 raise ValueError(f"unknown age model {name!r}; known: {', '.join(self.AGE_MODELS)}")
             cls, size = self.AGE_MODELS[name]

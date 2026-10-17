@@ -175,6 +175,15 @@ CONFIGS=(
   "F3|subtle|--target-strategy far --seed 1|jpeg"
   "F4|mid|--target-strategy far --seed 1|jpeg"
   "F5|high|--target-strategy far --seed 1|jpeg"
+  # Round 18 (2026-10-17): the age penalty over two estimators (genderage + the FairFace age ViT), judged
+  # by the held-out MiVOLO; the penalty is averaged over the models, so weight 2w matches w per model.
+  "G0|subtle|--target-strategy far --cloak-arg age_models=genderage,fairface|"
+  "G1|subtle|--target-strategy far --cloak-arg age_models=genderage,fairface --cloak-arg age_weight=2|"
+  "G2|mid|--target-strategy far --cloak-arg age_models=genderage,fairface|"
+  "G3|mid|--target-strategy far --cloak-arg age_models=genderage,fairface --cloak-arg age_weight=4|"
+  "G4|high|--target-strategy far --cloak-arg age_models=genderage,fairface|"
+  "G5|high|--target-strategy far --cloak-arg age_models=genderage,fairface --cloak-arg age_weight=6|"
+  "G6|mid|--target-strategy far --cloak-arg age_models=fairface|"
 )
 want=("$@")
 # SWEEP_STAGE=all (default): cloak and evaluate each configuration in one job, sharing $WORK.
