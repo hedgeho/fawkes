@@ -298,12 +298,20 @@ weight 10 in `mid` (no protection), and pushing the apparent age younger (`age_m
 evidence of a younger look (it reads 12 to 18 years younger at the `mid` and `high` budgets, 6 in
 `subtle`); the evidence is the sheets. The pool
 is LFW, mostly middle-aged men; for others the best skin or age match is sometimes poor (skin
-delta E 30 for one face in the author's photos). The `subtle` and `mid` numbers are single runs
-(noise about 0.06) and have no JPEG measurement; `mid` at age weight 3 with 150 steps (Q2) lost
-0.00 to 0.04 under JPEG 75.
+delta E 30 for one face in the author's photos).
 
-**Would change it.** A second, held-out age estimator to judge ageing; a larger and more diverse
-target pool; a user study at feed size in place of one person's eyes.
+**Update 2026-10-17 (round 17 in `eval/RESULTS.md`).** The harness had let Fawkes split an
+identity into several targets; with one target per identity, two identity splits and JPEG 75, the
+modes average 0.56 / 0.68 / 0.26 / 0.61 (`subtle`), 0.93 / 0.94 / 0.78 / 0.92 (`mid`) and 0.96 /
+0.99 / 0.85 / 0.97 (`high`), and 0.60 / 0.88 / 0.95 on a fifth, distinct transformer (ViT-L
+WebFace42M). The split moves `subtle` by up to 0.36, and JPEG costs `subtle` up to 0.26, the other
+modes at most 0.06. A held-out age estimator (MiVOLO v2) shows the penalty overfits genderage: on the
+author's photos the cloaks still read +6 to +9 years older (+10 to +15 without the penalty), where
+genderage reads them younger. The age penalty is half a fix.
+
+**Would change it.** An age penalty that holds on estimators it was not trained against (an
+ensemble, judged by a model outside it); a larger and more diverse target pool; a user study at
+feed size in place of one person's eyes.
 
 ## Known limits, stated plainly
 

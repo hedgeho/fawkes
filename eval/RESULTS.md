@@ -329,6 +329,55 @@ What rounds 14 to 16 say:
   lower on LVFace-T) at 70 percent of its DSSIM. It shows the same kind of change as `mid`, so it is
   not a mode.
 
+## Round 17 (2026-10-17): the decision-13 modes, one target per identity, two splits, JPEG
+
+Before this round the harness let Fawkes group each protected identity's photos into "people" by
+embedding, and LFW's mixed photos split some identities into up to seven groups, each with its own
+automatic target. The rounds 11 to 16 rows with `far`/`near` therefore cloaked some identities
+toward several targets. The harness now passes `one_person=True`: exactly one target per identity
+(the logs show 10 per run). The modes are run as they ship (`subtle`, `mid`, `high`, automatic far
+target) on the usual split (seed 0) and a second one (seed 1: other protected, clean and target
+identities), each also under JPEG 75. Two new columns: `vit_l_wf42m`, insightface's ViT-L trained on
+WebFace42M, a transformer that shares neither data nor size with any surrogate; and the age shift by
+MiVOLO v2, an age estimator the cloak never saw (genderage, the "age shift" column, is what the age
+penalty optimises). Cloaks on an A100 (32 GPU minutes for all six), evaluation on CPU nodes.
+
+| label | mode | split | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | vit_l_wf42m | DSSIM face | genderage age shift | MiVOLO age shift (p10, p90) | s/photo |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| F0 | subtle | 0 | 0.66 | 0.76 | 0.28 | 0.74 | 0.78 | 0.0067 | -5.4 | -2.0 (-7.6, 2.2) | 2.9 |
+| F0 jpeg | | | 0.58 | 0.72 | 0.24 | 0.64 | 0.52 | | | | |
+| F3 | subtle | 1 | 0.46 | 0.60 | 0.24 | 0.48 | 0.42 | 0.0066 | -3.5 | 0.0 (-6.1, 5.8) | 2.5 |
+| F3 jpeg | | | 0.40 | 0.46 | 0.20 | 0.36 | 0.16 | | | | |
+| F1 | mid | 0 | 0.88 | 0.88 | 0.72 | 0.86 | 0.86 | 0.0124 | -13.0 | -2.2 (-7.6, 3.2) | 2.5 |
+| F1 jpeg | | | 0.86 | 0.92 | 0.68 | 0.86 | 0.84 | | | | |
+| F4 | mid | 1 | 0.98 | 1.00 | 0.84 | 0.98 | 0.90 | 0.0126 | -10.7 | 0.0 (-5.4, 7.3) | 2.5 |
+| F4 jpeg | | | 0.94 | 1.00 | 0.82 | 0.96 | 0.86 | | | | |
+| F2 | high | 0 | 0.98 | 0.98 | 0.82 | 0.96 | 0.98 | 0.0167 | -12.3 | -1.6 (-6.6, 3.9) | 3.8 |
+| F2 jpeg | | | 0.98 | 0.98 | 0.76 | 0.96 | 0.96 | | | | |
+| F5 | high | 1 | 0.94 | 1.00 | 0.88 | 0.98 | 0.92 | 0.0166 | -10.0 | 0.3 (-5.3, 8.2) | 3.9 |
+| F5 jpeg | | | 0.92 | 1.00 | 0.82 | 0.98 | 0.88 | | | | |
+
+What round 17 says:
+
+- The grouping bug did not flatter the decision-13 numbers. On split 0, one target per identity gives
+  the same `mid` (F1 against Q3, every evaluator within 0.02) and `high` (F2 against R5, within 0.04),
+  and a better `subtle` (F0 against M4: +0.06 to +0.16).
+- The split matters more than the 0.06 sampling noise quoted so far, most of all in `subtle`: split 1
+  is 0.04 to 0.36 lower there (0.16 or more on four evaluators), and 0.04 to 0.12 *higher* in `mid`. Means over the two splits:
+  `subtle` 0.56 / 0.68 / 0.26 / 0.61 / 0.60, `mid` 0.93 / 0.94 / 0.78 / 0.92 / 0.88, `high` 0.96 /
+  0.99 / 0.85 / 0.97 / 0.95 (buffalo_l / antelopev2 / AdaFace ViT-B / LVFace-T / ViT-L).
+- The distinct transformer is not a new weak spot: ViT-L WebFace42M sits with the ResNets in `mid`
+  and `high`. AdaFace ViT-B stays the hardest evaluator.
+- JPEG 75 costs `mid` and `high` 0.00 to 0.06. `subtle` loses 0.04 to 0.14 on four evaluators and
+  0.26 on ViT-L: at the smallest budget, re-encoding removes much of what that model responds to.
+- The age penalty overfits genderage. Genderage reads the cloaked LFW faces 3 to 13 years younger;
+  the held-out MiVOLO puts the mean shift at -2 to +0.3 years with a 90th percentile of +2 to +8. On
+  the author's photos (five, full resolution, the 2026-09-25 cloaks) MiVOLO measures +5.8 / +6.7 /
+  +8.5 years for `subtle` / `mid` / `high`, against +9.7 / +10.9 / +14.8 for the 2026-09-15 cloaks
+  without the penalty, while genderage says -1.4 / -8.2 / -15.8. The penalty roughly halves the
+  ageing a model it never saw detects; it does not remove it, and the LFW harness (low-resolution,
+  mostly middle-aged faces) underestimates it.
+
 ## Final modes of 2026-09-15 (`eval/run_mode.sh`, colour penalty, decision 12)
 
 Same protocol. `mid`: chroma_weight 30, eps 24; `high`: chroma_weight 30, eps 20; `low` unchanged

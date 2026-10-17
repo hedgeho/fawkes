@@ -184,10 +184,12 @@ deployments use (`buffalo_l`, a ResNet-50; `antelopev2`, a ResNet-100) and a vis
 | Fawkes 2, high (no colour penalty), JPEG 75 | 0.86 | 0.90 | 0.68 | 0.96 | 0.016 | - |
 | Fawkes 2, high | 0.92 | 0.98 | 0.64 | 0.94 | 0.016 | about 250 (CPU, estimated), 4.2 (A100) |
 | Fawkes 2, high, JPEG 75 | 0.90 | 0.96 | 0.64 | 0.94 | 0.016 | - |
-| Fawkes 2 (2026-09-25), subtle, automatic target | 0.60 | 0.66 | 0.22 | 0.58 | 0.007 | 2.7 (GPU) |
-| Fawkes 2 (2026-09-25), mid, automatic target | 0.88 | 0.88 | 0.70 | 0.86 | 0.013 | 3.3 (GPU) |
-| Fawkes 2 (2026-09-25), high, automatic target | 0.96 | 0.96 | 0.78 | 0.98 | 0.017 | 8.3 (GPU) |
-| Fawkes 2 (2026-09-25), high, automatic target, JPEG 75 | 0.94 | 0.96 | 0.78 | 0.98 | 0.017 | - |
+| Fawkes 2 (2026-09-25), subtle, automatic target | 0.56 | 0.68 | 0.26 | 0.61 | 0.007 | 2.7 (A100) |
+| Fawkes 2 (2026-09-25), subtle, automatic target, JPEG 75 | 0.49 | 0.59 | 0.22 | 0.50 | 0.007 | - |
+| Fawkes 2 (2026-09-25), mid, automatic target | 0.93 | 0.94 | 0.78 | 0.92 | 0.012 | 2.5 (A100) |
+| Fawkes 2 (2026-09-25), mid, automatic target, JPEG 75 | 0.90 | 0.96 | 0.75 | 0.91 | 0.012 | - |
+| Fawkes 2 (2026-09-25), high, automatic target | 0.96 | 0.99 | 0.85 | 0.97 | 0.017 | 3.9 (A100) |
+| Fawkes 2 (2026-09-25), high, automatic target, JPEG 75 | 0.95 | 0.99 | 0.79 | 0.97 | 0.017 | - |
 
 The original cloaks move the embeddings a little but every protected identity is still recognised.
 Fawkes 2 defeats the classifier for most identities on the ResNet recognisers. On the transformer
@@ -199,9 +201,10 @@ reddish and yellowish patches the earlier cloaks left on the skin are halved (th
 of the change inside the face box goes from 2.0 to 0.9 grey levels, 1.1 in the 2026-09-25 modes) at
 equal or better protection, except for a few points on the transformer evaluator in `high` and under
 JPEG in `mid`.
-The 2026-09-25 modes (decision 13) add the matched automatic target and the age penalty; the rows are
-the sweep configurations that became the modes (R5, Q3, M4 in eval/RESULTS.md), with the
-automatic target instead of the harness's random one. The earlier rows cloak toward a random LFW
+The 2026-09-25 modes (decision 13) add the matched automatic target and the age penalty; their rows
+are the mean of two identity splits (round 17 in eval/RESULTS.md), with the automatic target instead
+of the harness's random one. On a fifth evaluator, insightface's ViT-L trained on WebFace42M (shares
+no data with the surrogates), they protect 0.60 / 0.88 / 0.95, and 0.34 / 0.85 / 0.92 under JPEG 75. The earlier rows cloak toward a random LFW
 identity. `subtle` is the price of a cloak that is hard to see: on the author's photos every setting
 that protected more than it also showed, and the strength at which nothing showed protected nothing.
 Under 1:1 verification with the usual 0.3 cosine threshold, every cloaked photo in `high` fails to
