@@ -124,10 +124,13 @@ adaptively on cloaked photos after they are public.
 
 ## Custom evaluators
 
-`--evaluator KEY` for a key that is not built in calls `fawkes.models.load_evaluator(KEY)`. The
-returned object gets a list of aligned 112x112 RGB uint8 crops (insightface detection and alignment
-are still used) through `.embed(crops)` if present, otherwise by calling it, and must return one
-512-d vector per crop; the harness L2-normalises them.
+`--evaluator KEY` calls `fawkes.models.load_evaluator(KEY)` (the pack names `buffalo_l` and
+`antelopev2` map to `w600k_r50` and `glintr100`). Every photo is detected and aligned once, with
+insightface's SCRFD-10GF (the detector of both packs) and `norm_crop`; the crop is cached next to the
+embeddings by file hash and shared by all evaluators. The model gets a uint8 `(N, 112, 112, 3)` RGB
+batch (64 crops) through `.embed(batch)` if present, otherwise by being called with it, and must
+return one vector per crop; the harness L2-normalises them. The image-quality columns are cached in
+`<workdir>/quality.json` under a hash of the cloaked files, so the JPEG pass reuses them.
 
 ## Tests
 

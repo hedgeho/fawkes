@@ -264,92 +264,114 @@ def largest_face(faces):
     return max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
 
 
-class Evaluator:
-    """An adversary's recogniser: insightface detection + 5-point alignment + the pack's ArcFace model."""
+class Aligner:
+    """The adversary's face detection and alignment, shared by every evaluator: insightface's SCRFD-10GF
+    (buffalo_l det_10g; antelopev2's scrfd_10g_bnkps is the same file, sha256 5838f7fe...) and the
+    ArcFace five-point norm_crop of the largest face."""
 
-    def __init__(self, pack):
+    def __init__(self):
         from insightface.app import FaceAnalysis
-        from fawkes.models import onnx_session_options
-        self.name = pack
-        self.app = FaceAnalysis(name=pack, allowed_modules=["detection", "recognition"],
-                                providers=["CPUExecutionProvider"], sess_options=onnx_session_options())
-        self.app.prepare(ctx_id=-1, det_size=(640, 640))
-
-    def embed_one(self, rgb):
-        """Returns a (512,) L2-normalised embedding or None if no face is detected."""
-        face = largest_face(self.app.get(rgb[:, :, ::-1]))  # insightface expects BGR
-        if face is None:
-            return None
-        e = face.normed_embedding.astype(np.float32)
-        return e / max(np.linalg.norm(e), 1e-12)
-
-    def embed(self, images):
-        out = [self.embed_one(img) for img in images]
-        return np.stack([e for e in out if e is not None]) if any(e is not None for e in out) else np.zeros((0, 512))
-
-
-class ExternalEvaluator(Evaluator):
-    """Detection and alignment from insightface (buffalo_l's det_10g), embedding from
-    fawkes.models.load_evaluator(key). The model receives aligned 112x112 RGB uint8 crops, either
-    through `.embed(list_of_crops)` or by being called with the list."""
-
-    def __init__(self, key):
-        from insightface.app import FaceAnalysis
-        from fawkes.models import load_evaluator
-        self.name = key
-        self.model = load_evaluator(key)
         from fawkes.models import onnx_session_options
         self.app = FaceAnalysis(name="buffalo_l", allowed_modules=["detection"], providers=["CPUExecutionProvider"],
                                 sess_options=onnx_session_options())
         self.app.prepare(ctx_id=-1, det_size=(640, 640))
 
-    def embed_one(self, rgb):
+    def crop(self, rgb):
+        """Aligned 112x112 RGB uint8 crop of the largest face, or None if no face is detected."""
         from insightface.utils.face_align import norm_crop
-        face = largest_face(self.app.get(rgb[:, :, ::-1]))
+        bgr = np.ascontiguousarray(rgb[:, :, ::-1])  # insightface expects BGR
+        face = largest_face(self.app.get(bgr))
         if face is None:
             return None
-        crop = norm_crop(rgb[:, :, ::-1], landmark=face.kps, image_size=112)[:, :, ::-1]  # back to RGB
+        return np.ascontiguousarray(norm_crop(bgr, landmark=face.kps, image_size=112)[:, :, ::-1])
+
+
+class Evaluator:
+    """An adversary's recogniser on aligned crops: fawkes.models.load_evaluator(key). The insightface
+    pack names map to their recognition models (BUILTIN_EVALUATORS), which reproduce the packs'
+    FaceAnalysis embeddings (tests/test_models.py parity tests). The model gets a uint8 (N, 112, 112, 3)
+    RGB batch, through `.embed(batch)` if present, otherwise by being called with it."""
+
+    def __init__(self, key):
+        from fawkes.models import load_evaluator
+        self.name = key
+        self.model = load_evaluator(BUILTIN_EVALUATORS.get(key, key))
+
+    def embed_crops(self, crops):
         fn = getattr(self.model, "embed", self.model)
-        e = np.asarray(fn([np.ascontiguousarray(crop)]), dtype=np.float32).reshape(-1)
-        return e / max(np.linalg.norm(e), 1e-12)
+        e = np.asarray(fn(np.stack(crops)), dtype=np.float32).reshape(len(crops), -1)
+        return e / np.maximum(np.linalg.norm(e, axis=1, keepdims=True), 1e-12)
 
 
 def make_evaluator(key):
-    if key in BUILTIN_EVALUATORS:
-        return Evaluator(key)
     try:
         import fawkes.models  # noqa: F401
     except ImportError as e:
-        raise SystemExit(f"evaluator {key!r} is not built in and fawkes.models is not importable: {e}")
-    return ExternalEvaluator(key)
+        raise SystemExit(f"evaluator {key!r} needs fawkes.models, which is not importable: {e}")
+    return Evaluator(key)
+
+
+def file_sha(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
 
 
 class EmbeddingCache:
-    """sqlite cache: (evaluator, sha256 of file bytes) -> embedding blob, or NULL when no face was found."""
+    """sqlite cache keyed by the sha256 of the file bytes: (evaluator, sha) -> embedding blob, and
+    sha -> aligned crop (shared by all evaluators); NULL when no face was found."""
+
+    BATCH = 64
 
     def __init__(self, path):
         self.db = sqlite3.connect(path, timeout=600)  # several evaluation jobs may share one cache
         self.db.execute("CREATE TABLE IF NOT EXISTS emb (evaluator TEXT, sha TEXT, vec BLOB, PRIMARY KEY (evaluator, sha))")
+        self.db.execute("CREATE TABLE IF NOT EXISTS crops (sha TEXT PRIMARY KEY, crop BLOB)")
+        self._aligner = None
+
+    def crops(self, items):
+        """{sha: aligned crop or None} for (path, sha) items; each photo is detected once, ever."""
+        out, todo = {}, []
+        for p, sha in items:
+            row = self.db.execute("SELECT crop FROM crops WHERE sha=?", (sha,)).fetchone()
+            if row is None:
+                todo.append((p, sha))
+            else:
+                out[sha] = None if row[0] is None else np.frombuffer(row[0], np.uint8).reshape(112, 112, 3)
+        if todo and self._aligner is None:
+            self._aligner = Aligner()
+        for i, (p, sha) in enumerate(todo):
+            c = self._aligner.crop(np.asarray(Image.open(p).convert("RGB")))
+            self.db.execute("INSERT OR REPLACE INTO crops VALUES (?,?)", (sha, None if c is None else c.tobytes()))
+            out[sha] = c
+            if (i + 1) % 100 == 0:
+                self.db.commit()
+                print(f"  [detection] {i + 1}/{len(todo)}")
+        self.db.commit()
+        return out
 
     def embed_files(self, evaluator, paths):
         """Returns {path: embedding or None}. Only files missing from the cache are embedded."""
         result, todo = {}, []
         for p in paths:
-            with open(p, "rb") as f:
-                sha = hashlib.sha256(f.read()).hexdigest()
+            sha = file_sha(p)
             row = self.db.execute("SELECT vec FROM emb WHERE evaluator=? AND sha=?", (evaluator.name, sha)).fetchone()
             if row is None:
                 todo.append((p, sha))
             else:
                 result[p] = None if row[0] is None else np.frombuffer(row[0], dtype=np.float32)
-        for i, (p, sha) in enumerate(todo):
-            e = evaluator.embed_one(np.asarray(Image.open(p).convert("RGB")))
-            self.db.execute("INSERT OR REPLACE INTO emb VALUES (?,?,?)",
-                            (evaluator.name, sha, None if e is None else e.astype(np.float32).tobytes()))
-            result[p] = e
-            if (i + 1) % 50 == 0:
-                self.db.commit()
-                print(f"  [{evaluator.name}] embedded {i + 1}/{len(todo)}")
+        crops = self.crops(todo)
+        found = [(p, sha) for p, sha in todo if crops[sha] is not None]
+        for p, sha in todo:
+            if crops[sha] is None:
+                result[p] = None
+                self.db.execute("INSERT OR REPLACE INTO emb VALUES (?,?,?)", (evaluator.name, sha, None))
+        for i in range(0, len(found), self.BATCH):
+            chunk = found[i:i + self.BATCH]
+            for (p, sha), e in zip(chunk, evaluator.embed_crops([crops[sha] for _, sha in chunk])):
+                self.db.execute("INSERT OR REPLACE INTO emb VALUES (?,?,?)", (evaluator.name, sha, e.tobytes()))
+                result[p] = e
+            self.db.commit()
+            print(f"  [{evaluator.name}] embedded {min(i + self.BATCH, len(found))}/{len(found)}")
         self.db.commit()
         return result
 
@@ -539,6 +561,26 @@ def perceptual_quality(pairs):
             "age_shift_mivolo_p90": pct(d_mivolo, 90)}
 
 
+def cached_quality(workdir, pairs):
+    """image_quality + perceptual_quality of the (clean PNG, cloaked PNG) pairs, cached in
+    <workdir>/quality.json under a hash of the cloaked files, so the JPEG pass and re-evaluations
+    of the same cloaks do not recompute them."""
+    h = hashlib.sha256()
+    for clean_p, cloaked_p in pairs:
+        h.update(file_sha(cloaked_p).encode() if os.path.exists(cloaked_p) else b"-")
+    key, path = h.hexdigest(), os.path.join(workdir, "quality.json")
+    if os.path.exists(path):
+        cached = json.load(open(path))
+        if cached.get("key") == key:
+            return cached["quality"]
+    quality = image_quality(pairs)
+    quality.update(perceptual_quality(pairs))
+    with open(path + ".tmp", "w") as f:
+        json.dump({"key": key, "quality": quality}, f)
+    os.replace(path + ".tmp", path)
+    return quality
+
+
 # --------------------------------------------------------------------------- evaluation
 
 def probe_rows(split, workdir, cloaked_files, clean_gallery=False):
@@ -690,8 +732,7 @@ def main(argv=None):
             print(f"cloak only: evaluate later with --skip-cloak --workdir {args.workdir}")
             return None
 
-    quality = image_quality([(p, cloaked_path(p)) for p in to_cloak])
-    quality.update(perceptual_quality([(p, cloaked_path(p)) for p in to_cloak]))
+    quality = cached_quality(workdir, [(p, cloaked_path(p)) for p in to_cloak])
     quality.update(n_cloaked=len(to_cloak) - len(uncloaked), n_uncloaked=len(uncloaked), seconds_per_photo=seconds_per_photo)
 
     cloaked_files = {p: cloaked_path(p) for p in to_cloak}
