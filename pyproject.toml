@@ -30,9 +30,10 @@ dependencies = [
 eval = ["scikit-learn>=1.4"]
 # torch lives in one of these two extras so a CPU box never downloads the CUDA libraries:
 # `uv sync --extra cpu` without a GPU, `uv sync --extra cu128` with CUDA (pip users: pip install '.[cpu]')
-# torchvision rides along (same wheel index) because the `perceptual` extra's LPIPS needs it
-cpu = ["torch>=2.4", "torchvision>=0.19"]
-cu128 = ["torch>=2.4", "torchvision>=0.19"]
+# torchvision rides along (same wheel index) because the `perceptual` extra's LPIPS needs it; timm builds
+# the FairFace ViT of the age penalty (fawkes.target_pool.TorchFairFaceAge)
+cpu = ["torch>=2.4", "torchvision>=0.19", "timm>=1.0"]
+cu128 = ["torch>=2.4", "torchvision>=0.19", "timm>=1.0"]
 # LPIPS perceptual penalty (CloakParams.lpips_weight) and metric; install with cpu or cu128
 perceptual = ["lpips>=0.1.4"]
 

@@ -24,6 +24,13 @@ POOL_FILE = "target_pool/lfw_pool.npz"
 GENDERAGE_REPO = "public-data/insightface"
 GENDERAGE_FILE = "models/buffalo_l/genderage.onnx"
 GENDERAGE_SHA256 = "4fde69b1c810857b88c64a335084f1c3fe8f01246c9a191b48c7bb756d6652fb"
+# second age model of the age penalty: ViT-B/16 fine-tuned on FairFace age groups (Apache-2.0)
+FAIRFACE_REPO = "dima806/fairface_age_image_detection"
+FAIRFACE_FILE = "model.safetensors"
+FAIRFACE_REVISION = "4e02ab8057ea7fd74b1670940995c5dfda3e6ec0"
+FAIRFACE_SHA256 = "1265d8e5a8a363a615898be873c224aebc6f310654bf23b1745da0975a7b7555"
+# centres of its nine classes 0-2, 3-9, 10-19, ..., 60-69, 70+ in years
+FAIRFACE_AGES = (1.0, 6.0, 14.5, 24.5, 34.5, 44.5, 54.5, 64.5, 75.0)
 # same-person threshold for grouping the faces to protect (cosine of the first surrogate)
 SAME_PERSON = 0.4
 
@@ -69,6 +76,77 @@ class TorchAge:
         from fawkes.align import warp_to_template
         aligned = warp_to_template(x / 255.0, matrices, image_size=96) * 255.0
         return self.net(aligned)[:, 2] * 100.0
+
+
+def fairface_path():
+    """Local path of the FairFace age ViT (343 MB), downloaded and checked on first use."""
+    from huggingface_hub import hf_hub_download
+    from fawkes.models import model_dir, sha256sum
+    path = model_dir() / "fairface_age" / FAIRFACE_FILE
+    if not path.exists():
+        path = Path(hf_hub_download(FAIRFACE_REPO, FAIRFACE_FILE, revision=FAIRFACE_REVISION,
+                                    local_dir=str(model_dir() / "fairface_age")))
+        if sha256sum(path) != FAIRFACE_SHA256:
+            path.unlink()
+            raise RuntimeError("sha256 mismatch for the FairFace age model; file removed")
+    return path
+
+
+def _fairface_state_dict(hf):
+    """transformers ViTForImageClassification keys -> timm VisionTransformer keys."""
+    out = {"cls_token": hf["vit.embeddings.cls_token"], "pos_embed": hf["vit.embeddings.position_embeddings"],
+           "patch_embed.proj.weight": hf["vit.embeddings.patch_embeddings.projection.weight"],
+           "patch_embed.proj.bias": hf["vit.embeddings.patch_embeddings.projection.bias"],
+           "norm.weight": hf["vit.layernorm.weight"], "norm.bias": hf["vit.layernorm.bias"],
+           "head.weight": hf["classifier.weight"], "head.bias": hf["classifier.bias"]}
+    i = 0
+    while f"vit.encoder.layer.{i}.layernorm_before.weight" in hf:
+        a, b = f"vit.encoder.layer.{i}.", f"blocks.{i}."
+        for t in ("weight", "bias"):
+            out[b + "attn.qkv." + t] = torch_cat([hf[a + f"attention.attention.{q}.{t}"] for q in ("query", "key", "value")])
+            out[b + "attn.proj." + t] = hf[a + "attention.output.dense." + t]
+            out[b + "norm1." + t] = hf[a + "layernorm_before." + t]
+            out[b + "norm2." + t] = hf[a + "layernorm_after." + t]
+            out[b + "mlp.fc1." + t] = hf[a + "intermediate.dense." + t]
+            out[b + "mlp.fc2." + t] = hf[a + "output.dense." + t]
+        i += 1
+    return out
+
+
+def torch_cat(ts):
+    import torch
+    return torch.cat(ts, dim=0)
+
+
+class TorchFairFaceAge:
+    """FairFace age ViT as a differentiable torch function: expected age in years (softmax over the
+    nine age groups, FAIRFACE_AGES) of (N,3,H,W) [0,255] RGB crops, each with a 2x3 map to the
+    model's 224x224 input (genderage_matrix(box, 224): the same framing as genderage). A second
+    architecture and training set for the age penalty, so it cannot satisfy one estimator only."""
+
+    SIZE = 224
+
+    def __init__(self, device):
+        import functools
+        import timm
+        import torch
+        from safetensors.torch import load_file
+        self.net = timm.create_model("vit_base_patch16_224", pretrained=False, num_classes=len(FAIRFACE_AGES),
+                                     norm_layer=functools.partial(torch.nn.LayerNorm, eps=1e-12))
+        self.net.load_state_dict(_fairface_state_dict(load_file(str(fairface_path()))))
+        self.net = self.net.to(device).eval()
+        for q in self.net.parameters():
+            q.requires_grad_(False)
+        self.ages = torch.tensor(FAIRFACE_AGES, device=device)
+
+    def logits(self, aligned01):
+        """Class logits of (N,3,224,224) RGB in [0,1] (ViTImageProcessor: mean 0.5, std 0.5)."""
+        return self.net((aligned01 - 0.5) / 0.5)
+
+    def __call__(self, x, matrices):
+        from fawkes.align import warp_to_template
+        aligned = warp_to_template(x / 255.0, matrices, image_size=self.SIZE)
+        return self.logits(aligned).softmax(dim=1) @ self.ages
 
 
 class AgeGender:

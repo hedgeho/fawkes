@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pytest
 import torch
@@ -475,3 +477,36 @@ def test_age_penalty_runs():
     params = cloak.CloakParams(steps=6, eps=8.0, dssim_budget=0.05, eot_samples=1, stop_cos=1.01, age_weight=1.0)
     res = cloak.Cloaker(surrogates, params).cloak(crops, targets)
     assert len(res.images) == 2 and np.isfinite(res.cos).all()
+
+
+def _needs_fairface():
+    from fawkes.models import model_dir
+    from fawkes.target_pool import FAIRFACE_FILE, GENDERAGE_FILE
+    if not (model_dir() / "fairface_age" / FAIRFACE_FILE).exists() or not (model_dir() / GENDERAGE_FILE).exists():
+        pytest.skip("FairFace age model or genderage.onnx not downloaded")
+
+
+def test_fairface_age_matches_upstream():
+    """Reference logits: transformers 4.51 ViTForImageClassification of dima806/fairface_age_image_detection
+    (revision 4e02ab80) with its ViTImageProcessor on tests/data/aligned_112.png (PIL bilinear to 224)."""
+    _needs_fairface()
+    from PIL import Image
+    from fawkes.target_pool import TorchFairFaceAge
+    data = os.path.join(os.path.dirname(__file__), "data")
+    x = np.asarray(Image.open(os.path.join(data, "aligned_112.png")).convert("RGB").resize((224, 224), Image.BILINEAR),
+                   np.float32) / 255.0
+    with torch.no_grad():
+        logits = TorchFairFaceAge("cpu").logits(torch.from_numpy(x).permute(2, 0, 1)[None]).numpy()
+    np.testing.assert_allclose(logits, np.load(os.path.join(data, "ref_fairface_age_logits.npy")), atol=1e-3)
+
+
+def test_age_penalty_ensemble_runs_and_rejects_unknown_models():
+    _needs_fairface()
+    surrogates = {"a": DummySurrogate(1)}
+    targets = {k: v[0] for k, v in cloak.Cloaker(surrogates).embed(_crops(3)[2:]).items()}
+    params = cloak.CloakParams(steps=4, eps=8.0, dssim_budget=0.05, eot_samples=1, stop_cos=1.01, age_weight=1.0,
+                               age_models="genderage,fairface")
+    res = cloak.Cloaker(surrogates, params).cloak(_crops(2), targets)
+    assert len(res.images) == 2 and np.isfinite(res.cos).all()
+    with pytest.raises(ValueError):
+        cloak.Cloaker(surrogates, cloak.CloakParams(steps=2, age_weight=1.0, age_models="nope")).cloak(_crops(1), targets)
