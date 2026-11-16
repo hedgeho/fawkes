@@ -27,7 +27,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-eval = ["scikit-learn>=1.4"]
+eval = [
+    "matplotlib>=3.11.2",
+    "scikit-learn>=1.4",
+]
 # torch lives in one of these two extras so a CPU box never downloads the CUDA libraries:
 # `uv sync --extra cpu` without a GPU, `uv sync --extra cu128` with CUDA (pip users: pip install '.[cpu]')
 # torchvision rides along (same wheel index) because the `perceptual` extra's LPIPS needs it; timm builds

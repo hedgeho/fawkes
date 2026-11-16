@@ -39,10 +39,10 @@ MODES = ["clean", "low", "subtle", "mid", "high"]
 PERSONS = ["Barack_Obama", "Serena_Williams", "Junichiro_Koizumi", "Tony_Blair"]
 SCALE = 64.0
 # protection rate, README evaluation table: (buffalo_l, antelopev2) ResNets, (AdaFace ViT-B, LVFace-T)
-# transformers; low is the 2026-09-12 row (random target, LVFace-T not measured)
-PROTECTION = {"clean": ((0, 0), (0, 0)), "low": ((0.74, 0.90), (0.20, None)),
-              "subtle": ((0.60, 0.66), (0.22, 0.58)), "mid": ((0.88, 0.88), (0.70, 0.86)),
-              "high": ((0.96, 0.96), (0.78, 0.98))}
+# transformers
+PROTECTION = {"clean": ((0, 0), (0, 0)), "low": ((0.95, 1.00), (0.42, 0.57)),
+              "subtle": ((0.56, 0.68), (0.26, 0.61)), "mid": ((0.93, 0.94), (0.78, 0.92)),
+              "high": ((0.96, 0.99), (0.85, 0.97))}
 
 
 def short(name):

@@ -21,6 +21,36 @@ This fork is a rewrite of the cloaking pipeline (version 2):
 
 The reasons behind these choices, with sources, are in [docs/DECISIONS.md](docs/DECISIONS.md).
 
+### Results
+
+The **protection rate** is the fraction of a person's clean photos that a face classifier gets wrong
+after it was trained on their cloaked photos. The classifier uses one of five recognisers, none of
+which was used to build the cloaks: two ResNets (buffalo_l, antelopev2) and three transformers
+(AdaFace ViT-B, LVFace-T, ViT-L WebFace42M). Numbers are on LFW, averaged over two splits of 10
+protected identities (see [Evaluation](#evaluation)).
+
+| mode | protection, ResNets | protection, transformers | after JPEG 75, weakest recogniser | visible change (DSSIM, face) | apparent ageing (MiVOLO, author's photos) |
+|---|---|---|---|---|---|
+| Fawkes 1.0, mid | 0.00 / 0.00 | - | 0.00 | 0.015 | - |
+| low | 0.95 / 1.00 | 0.42 / 0.57 / 0.49 | 0.45 | 0.012 | not measured |
+| subtle | 0.56 / 0.68 | 0.26 / 0.61 / 0.60 | 0.22 | 0.007 | +5.8 years |
+| mid | 0.93 / 0.94 | 0.78 / 0.92 / 0.88 | 0.75 | 0.012 | +6.7 years |
+| high | 0.96 / 0.99 | 0.85 / 0.97 / 0.95 | 0.79 | 0.017 | +8.5 years |
+
+`mid` and `high` defeat the classifier for most people on every recogniser, and the original Fawkes
+for none. `low` uses only the two ResNet surrogates: it protects as well as `high` on the ResNets
+and half as well on the transformers, and without the colour and age penalties it tints the skin.
+`subtle` is hard to see at feed size and protects about half as well as `mid`. All modes still make
+faces look a few years older; see [Known limitations](#known-limitations).
+
+![Barack Obama's official portrait, clean and cloaked in every mode: the face at feed size, a 100 percent crop around the eyes, and the change amplified four times](docs/img/closeup.jpg)
+
+The same photo (Barack Obama's official portrait, 1280 pixels wide, from Wikimedia Commons) at feed
+size, at 100 percent, and the change amplified four times. At feed size the cloaks are hard to tell
+apart from the clean photo; at full size `mid` and `high` show darker brows and lines under the
+eyes, `subtle` much less, and `low`, without the colour penalty, a reddish and greenish tint. Made
+with `eval/closeup.py`.
+
 Licence
 -------
 The code in this repository is released under the BSD-3-Clause licence (see [LICENSE](LICENSE));
@@ -55,17 +85,18 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
 * `-m`, `--mode`: `low`, `subtle`, `mid` (default) or `high`, the tradeoff between protection
   strength, visible change and run time:
 
-  | mode | surrogates | steps | max pixel change | DSSIM budget | colour penalty | age penalty | s / face, GPU |
-  |---|---|---|---|---|---|---|---|
-  | low | AdaFace IR-101, ArcFace IR-100 | 60 | 16 | 0.012 | - | - | 1.1 |
-  | subtle | + LVFace-B, LVFace-L, LVFace-S (transformers) | 120 | 12 | 0.006 | 30 | 1 | 2.7 |
-  | mid | same five | 120 | 24 | 0.012 | 30 | 2 | 3.3 |
-  | high | same five | 200 | 20 | 0.017 | 30 | 3 | 8.3 |
+  | mode | surrogates | steps | max pixel change | DSSIM budget | colour penalty | age penalty | s / face, A100 | s / face, 8-core CPU |
+  |---|---|---|---|---|---|---|---|---|
+  | low | AdaFace IR-101, ArcFace IR-100 | 60 | 16 | 0.012 | - | - | 0.4 | 18 |
+  | subtle | + LVFace-B, LVFace-L, LVFace-S (transformers) | 120 | 12 | 0.006 | 30 | 1 | 2.7 | 55 |
+  | mid | same five | 120 | 24 | 0.012 | 30 | 2 | 3.3 | 53 |
+  | high | same five | 200 | 20 | 0.017 | 30 | 3 | 5.2 | 76 |
 
   `subtle` is for photos you want to post: at feed size the change is hard to see, and it protects
   less (see [Evaluation](#evaluation)). `mid` and `high` protect more and are visible as a slight
-  change of the face's shading. On an 8-core CPU without a GPU, `low` takes about 35 s per face; the
-  other modes take several minutes (not measured since the step counts were raised).
+  change of the face's shading. The times are per extra face with the default batch size
+  (`eval/time_modes.sh`, LFW photos, an A100 and 8 cores of a Cascade Lake Xeon); every run also
+  spends 20 to 30 s on a GPU, and 3 to 90 s on a CPU, loading the models and picking the target.
 
   Every mode also penalises what is left of your own identity in the cloaked face
   (`--self-weight`, see [docs/DECISIONS.md](docs/DECISIONS.md#10-penalise-the-residual-similarity-to-the-own-face-not-only-the-distance-to-the-target)).
@@ -75,6 +106,8 @@ Every image in `./imgs` gets a `<name>_cloaked.png` next to it. Options:
   All but `low` also penalise the apparent ageing of the face: without it the cloak draws folds and
   lines under the eyes that make people look years older (`--age-weight`,
   [decision 13](docs/DECISIONS.md#13-a-matched-automatic-target-an-age-penalty-and-a-subtle-mode)).
+  The penalty reduces this ageing but does not remove it (see
+  [Known limitations](#known-limitations)).
 
 * `--models`: comma-separated surrogate keys overriding the mode (`python -m fawkes.models list`).
 * `--steps`, `--eps`, `--th`, `--no-eot`, `--self-weight`: override the mode's steps, pixel bound,
@@ -95,8 +128,7 @@ Each column is one person (Barack Obama from Wikimedia Commons, and three people
 [LFW](https://vis-www.cs.umass.edu/lfw/)), and each row is a mode. Every tile is one of the three
 photos that person "posts", cloaked in that row's mode with the automatic target. The row labels give
 the mode's protection rate from [Evaluation](#evaluation) on the two ResNet recognisers (buffalo_l /
-antelopev2) and the two transformers (AdaFace ViT-B / LVFace-T). For `low` these are the 2026-09-12
-run, which used a random target, and LVFace-T was not measured.
+antelopev2) and two of the transformers (AdaFace ViT-B / LVFace-T).
 
 The lines under a tile are the output of a simple face classifier: buffalo_l embeddings, one reference
 per identity (the mean embedding of its photos), and a cosine threshold of 0.35.
@@ -140,21 +172,34 @@ the same directory every time; the embedding is cached in `<target-dir>/fawkes_t
 
 ### Tips
 
-- Run time on an 8-core CPU without a GPU is about 35 s per face in `low` and several minutes per
-  face in the other modes; batching several faces is faster per face. A CUDA GPU is used
+- Run time on an 8-core CPU without a GPU is about 20 s per face in `low` and about a minute per
+  face in the other modes, plus up to a minute and a half to load the models; cloaking many photos
+  in one run is faster per photo. A CUDA GPU is used
   automatically when PyTorch finds one (install with the `cu128` extra).
 - Most of your published photos need to be cloaked for the protection to work; a recogniser trained
   on mostly clean photos of you learns your real face regardless.
 - Cloaks survive JPEG re-encoding by design, but do not resize or filter the output more than a
   social network would.
 
-### What this does and does not protect against
+### Known limitations
 
-Cloaks are fixed once you publish a photo, but recognisers keep improving. Radiya-Dixit et al.
-([ICLR 2022](https://arxiv.org/abs/2106.14851)) showed that a model trained *after* a cloaking tool is
-released, or trained specifically against it, can defeat any such tool, including the original
-Fawkes. The evaluation below measures transfer to strong recognisers of today that were not used to
-build the cloaks. It does not, and cannot, promise protection against future or adaptive models.
+- **Future and adaptive recognisers.** Cloaks are fixed once you publish a photo, but recognisers
+  keep improving. Radiya-Dixit et al. ([ICLR 2022](https://arxiv.org/abs/2106.14851)) showed that a
+  model trained *after* a cloaking tool is released, or trained specifically against it, can defeat
+  any such tool, including the original Fawkes. The evaluation measures transfer to strong
+  recognisers of today that were not used to build the cloaks. It does not, and cannot, promise
+  protection against future or adaptive models.
+- **Cloaked faces look older.** The age penalty is optimised against one age model (genderage), which
+  then reads the cloaked faces as younger. An age model the cloak never saw (MiVOLO v2) still reads
+  the author's full-resolution photos as 5.8 / 6.7 / 8.5 years older in `subtle` / `mid` / `high`
+  (10 to 15 years for the earlier cloaks without the penalty). On the small LFW faces the mean
+  shift is near zero, but one face in ten gains 2 to 8 years.
+- **`subtle` is weak against some recognisers.** It protects 0.26 on AdaFace ViT-B, and JPEG
+  re-encoding takes the ViT-L WebFace42M rate from 0.60 to 0.34.
+- **Results vary with who is protected.** The two identity splits differ by up to 0.36 in `subtle`,
+  0.34 in `low`, 0.12 in `mid` and 0.06 in `high`, often more than the 0.06 sampling noise of each number.
+- **AdaFace ViT-B is the hardest recogniser** in every mode, 0.07 to 0.3 below the
+  next weakest.
 
 Evaluation
 ----------
@@ -164,58 +209,59 @@ photos of some identities (each toward its own target identity), trains a linear
 embeddings from **held-out** recognisers, and reports the **protection rate**: the fraction of clean
 test photos of protected identities that the classifier gets wrong. 10 protected and 10 clean
 identities, 10 training and 5 test photos each. The evaluators are the InsightFace packs most
-deployments use (`buffalo_l`, a ResNet-50; `antelopev2`, a ResNet-100) and a vision transformer
-(AdaFace ViT-B, WebFace4M); none of them is in the surrogate ensemble.
+deployments use (`buffalo_l`, a ResNet-50; `antelopev2`, a ResNet-100) and three vision transformers:
+AdaFace ViT-B (WebFace4M), LVFace-T (Glint360K, the same family as three of the surrogates, so a
+weaker test) and ViT-L (WebFace42M, shares no data with the surrogates). None of them is in the
+surrogate ensemble.
 
-| cloaker | buffalo_l | antelopev2 | AdaFace ViT-B | LVFace-T | DSSIM face box | s / photo |
-|---|---|---|---|---|---|---|
-| none | 0.00 | 0.00 | 0.00 | 0.00 | 0 | - |
-| Fawkes 1.0 (TensorFlow), mid | 0.00 | 0.00 | - | - | 0.015 | 15 (CPU) |
-| Fawkes 1.0, mid, JPEG 75 | 0.00 | 0.00 | - | - | 0.015 | - |
-| Fawkes 2, low | 0.74 | 0.90 | 0.20 | - | 0.012 | 35 (CPU), 1.1 (A100) |
-| Fawkes 2, low, JPEG 75 | 0.70 | 0.84 | 0.22 | - | 0.012 | - |
-| Fawkes 2, mid (three surrogates, 2026-09-12) | 0.74 | 0.84 | 0.32 | - | 0.012 | 56 (CPU), 1.0 (A100) |
-| Fawkes 2, mid (no colour penalty, 2026-09-13) | 0.80 | 0.92 | 0.48 | 0.90 | 0.013 | 74 (CPU), 1.7 (A100) |
-| Fawkes 2, mid (no colour penalty), JPEG 75 | 0.74 | 0.84 | 0.44 | 0.92 | 0.013 | - |
-| Fawkes 2, mid | 0.86 | 0.94 | 0.46 | 0.94 | 0.013 | 78 (CPU), 1.3 (H100) |
-| Fawkes 2, mid, JPEG 75 | 0.82 | 0.88 | 0.38 | 0.92 | 0.013 | - |
-| Fawkes 2, high (three surrogates, 2026-09-12, rerun Z0) | 0.82 | 0.92 | 0.52 | 0.78 | 0.017 | about 190 (CPU), 2.8 (A100) |
-| Fawkes 2, high (no colour penalty, 2026-09-13) | 0.86 | 0.92 | 0.70 | 0.96 | 0.016 | about 250 (CPU, estimated), 4.4 (A100) |
-| Fawkes 2, high (no colour penalty), JPEG 75 | 0.86 | 0.90 | 0.68 | 0.96 | 0.016 | - |
-| Fawkes 2, high | 0.92 | 0.98 | 0.64 | 0.94 | 0.016 | about 250 (CPU, estimated), 4.2 (A100) |
-| Fawkes 2, high, JPEG 75 | 0.90 | 0.96 | 0.64 | 0.94 | 0.016 | - |
-| Fawkes 2 (2026-09-25), subtle, automatic target | 0.56 | 0.68 | 0.26 | 0.61 | 0.007 | 2.7 (A100) |
-| Fawkes 2 (2026-09-25), subtle, automatic target, JPEG 75 | 0.49 | 0.59 | 0.22 | 0.50 | 0.007 | - |
-| Fawkes 2 (2026-09-25), mid, automatic target | 0.93 | 0.94 | 0.78 | 0.92 | 0.012 | 2.5 (A100) |
-| Fawkes 2 (2026-09-25), mid, automatic target, JPEG 75 | 0.90 | 0.96 | 0.75 | 0.91 | 0.012 | - |
-| Fawkes 2 (2026-09-25), high, automatic target | 0.96 | 0.99 | 0.85 | 0.97 | 0.017 | 3.9 (A100) |
-| Fawkes 2 (2026-09-25), high, automatic target, JPEG 75 | 0.95 | 0.99 | 0.79 | 0.97 | 0.017 | - |
+The current modes, as they ship (automatic target), each the mean of two identity splits (rounds 17
+and 19 in [eval/RESULTS.md](eval/RESULTS.md)):
+
+| mode | buffalo_l | antelopev2 | AdaFace ViT-B | LVFace-T | ViT-L | DSSIM face | MiVOLO age shift on LFW, mean (90th percentile) |
+|---|---|---|---|---|---|---|---|
+| none | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 | - |
+| Fawkes 1.0 (TensorFlow), mid | 0.00 | 0.00 | - | - | - | 0.015 | - |
+| Fawkes 1.0, mid, JPEG 75 | 0.00 | 0.00 | - | - | - | | | |
+| low | 0.95 | 1.00 | 0.42 | 0.57 | 0.49 | 0.012 | +1.3 (+8 to +10) |
+| low, JPEG 75 | 0.90 | 0.96 | 0.45 | 0.63 | 0.49 | | | |
+| subtle | 0.56 | 0.68 | 0.26 | 0.61 | 0.60 | 0.007 | -1.0 (+2 to +6) |
+| subtle, JPEG 75 | 0.49 | 0.59 | 0.22 | 0.50 | 0.34 | | | |
+| mid | 0.93 | 0.94 | 0.78 | 0.92 | 0.88 | 0.012 | -1.1 (+3 to +7) |
+| mid, JPEG 75 | 0.90 | 0.96 | 0.75 | 0.91 | 0.85 | | | |
+| high | 0.96 | 0.99 | 0.85 | 0.97 | 0.95 | 0.017 | -0.7 (+4 to +8) |
+| high, JPEG 75 | 0.95 | 0.99 | 0.79 | 0.97 | 0.92 | | | |
 
 The original cloaks move the embeddings a little but every protected identity is still recognised.
-Fawkes 2 defeats the classifier for most identities on the ResNet recognisers. On the transformer
-evaluator `mid` / `high` went from 0.32 / 0.52 with three surrogates to 0.48 / 0.70 once the
-ensemble gained two more transformers, and to 0.70 / 0.78 with the matched target; a fourth
-evaluator, LVFace-T, is a transformer from the same family as three of the surrogates and is a
-weaker test. The current modes also penalise the colour of the cloak (decision 12): the smooth
-reddish and yellowish patches the earlier cloaks left on the skin are halved (the low-passed chroma
-of the change inside the face box goes from 2.0 to 0.9 grey levels, 1.1 in the 2026-09-25 modes) at
-equal or better protection, except for a few points on the transformer evaluator in `high` and under
-JPEG in `mid`.
-The 2026-09-25 modes (decision 13) add the matched automatic target and the age penalty; their rows
-are the mean of two identity splits (round 17 in eval/RESULTS.md), with the automatic target instead
-of the harness's random one. On a fifth evaluator, insightface's ViT-L trained on WebFace42M (shares
-no data with the surrogates), they protect 0.60 / 0.88 / 0.95, and 0.34 / 0.85 / 0.92 under JPEG 75. The earlier rows cloak toward a random LFW
-identity. `subtle` is the price of a cloak that is hard to see: on the author's photos every setting
-that protected more than it also showed, and the strength at which nothing showed protected nothing.
-Under 1:1 verification with the usual 0.3 cosine threshold, every cloaked photo in `high` fails to
-match its own identity on all four evaluators, 99 percent in `mid`, and 96 percent in `subtle` (84
-percent on AdaFace ViT-B). The table is for an adversary that trains on the cloaked photos and meets
-clean ones; with the sides swapped (`--clean-gallery`: the adversary already holds clean photos and
-meets a cloaked one), the 2026-09-13 cloaks give 0.80 / 0.91 / 0.55 / 0.97 in `mid` and 0.89 / 0.93
-/ 0.71 / 1.00 in `high`. Each number is 50 test photos, so differences below about 0.06 are noise.
-Every configuration tried on the way to these settings is in [eval/RESULTS.md](eval/RESULTS.md); the
-reasoning is in [docs/DECISIONS.md](docs/DECISIONS.md). See [eval/README.md](eval/README.md) for the
-metrics and how to run it.
+Each current-mode number is 100 test photos (50 per split); the sampling noise is about 0.06, but
+the two splits differ by more than that (see [Known limitations](#known-limitations)). The age
+shift is measured by MiVOLO v2, an age model the cloak never saw; the 90th percentile is given per
+split.
+
+The table is for one threat model. Others:
+
+| adversary | low | subtle | mid | high |
+|---|---|---|---|---|
+| trains on the cloaked photos, meets clean ones (the table above) | 0.42 to 1.00 | 0.26 to 0.68 | 0.78 to 0.94 | 0.85 to 0.99 |
+| holds clean photos, meets a cloaked one (`--clean-gallery`) | 0.43 to 0.96 | 0.26 to 0.82 | 0.68 to 0.97 | 0.81 to 0.99 |
+| 1:1 verification against a clean photo, cosine threshold 0.3: cloaked photos that fail to match | 0.95 to 1.00 | 0.86 to 0.97 | 0.99 to 1.00 | 1.00 |
+
+Ranges are over the evaluators and are means of the two splits; AdaFace ViT-B is the low end
+everywhere. The clean gallery uses the same cloaks (rounds 17 and 19): it is about as hard to beat
+as the main threat model, a little easier on AdaFace ViT-B in `mid` and `high` (0.68 / 0.81 against
+0.78 / 0.85).
+
+![Protection rate against visible change for every released set of modes, on the ResNets and on AdaFace ViT-B](docs/img/progress.png)
+
+How the modes got here: with three surrogates `mid` / `high` protected 0.32 / 0.52 on AdaFace
+ViT-B; two more transformer surrogates took that to 0.48 / 0.70 (2026-09-13), a colour penalty
+halved the reddish and yellowish patches on the skin at about equal protection (2026-09-15, decision
+12), and the matched automatic target with the age penalty brought it to 0.78 / 0.85 (2026-09-25,
+decision 13). `subtle` is the price of a cloak that is hard to see: on the author's photos every
+setting that protected more than it also showed, and the strength at which nothing showed protected
+nothing. The chart is made with `eval/plot_progress.py`. Every configuration tried is in
+[eval/RESULTS.md](eval/RESULTS.md); the reasoning is in
+[docs/DECISIONS.md](docs/DECISIONS.md). See [eval/README.md](eval/README.md) for the metrics and how
+to run it.
 
 Quick Installation
 ------------------
