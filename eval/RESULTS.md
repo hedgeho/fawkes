@@ -378,6 +378,72 @@ What round 17 says:
   ageing a model it never saw detects; it does not remove it, and the LFW harness (low-resolution,
   mostly middle-aged faces) underestimates it.
 
+## Round 19 (2026-11-16): `low` under the round-17 protocol, clean gallery, CLI timing
+
+`low` had not been run since 2026-09-12 (random target, before LVFace-T and ViT-L). F6 / F7 run it as
+it ships (automatic far target, one per identity) on splits 0 and 1, in the round-17 workdir, so
+the clean photos and splits are the same. Cloaks on an A100 (3 GPU minutes for both), evaluation on
+CPU.
+
+| label | mode | split | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | vit_l_wf42m | DSSIM face | chroma LF | genderage age shift | MiVOLO age shift (p10, p90) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| F6 | low | 0 | 0.96 | 1.00 | 0.42 | 0.62 | 0.66 | 0.0124 | 1.82 | -0.4 | 0.5 (-6.6, 9.6) |
+| F6 jpeg | | | 0.86 | 0.94 | 0.44 | 0.66 | 0.64 | | | | |
+| F7 | low | 1 | 0.94 | 1.00 | 0.42 | 0.52 | 0.32 | 0.0124 | 1.80 | 2.1 | 2.1 (-3.8, 8.3) |
+| F7 jpeg | | | 0.94 | 0.98 | 0.46 | 0.60 | 0.34 | | | | |
+
+Clean gallery (`--clean-gallery`, SWEEP_EVAL_ARGS) on the cloaks of F0-F7: the probe is fitted on the
+clean test photos and asked to recognise the 100 cloaked train photos per split.
+
+| label | mode | split | buffalo_l | antelopev2 | adaface_vit_b | lvface_t | vit_l_wf42m |
+|---|---|---|---|---|---|---|---|
+| F6 | low | 0 | 0.93 | 0.97 | 0.43 | 0.64 | 0.63 |
+| F6 jpeg | | | 0.92 | 0.95 | 0.47 | 0.70 | 0.59 |
+| F7 | low | 1 | 0.95 | 0.96 | 0.42 | 0.50 | 0.38 |
+| F7 jpeg | | | 0.91 | 0.94 | 0.44 | 0.59 | 0.37 |
+| F0 | subtle | 0 | 0.80 | 0.83 | 0.21 | 0.82 | 0.75 |
+| F0 jpeg | | | 0.63 | 0.75 | 0.18 | 0.80 | 0.59 |
+| F3 | subtle | 1 | 0.64 | 0.82 | 0.30 | 0.64 | 0.60 |
+| F3 jpeg | | | 0.52 | 0.66 | 0.18 | 0.47 | 0.35 |
+| F1 | mid | 0 | 0.98 | 0.95 | 0.66 | 0.99 | 0.96 |
+| F1 jpeg | | | 0.98 | 0.95 | 0.67 | 0.98 | 0.90 |
+| F4 | mid | 1 | 0.93 | 1.00 | 0.70 | 0.95 | 0.82 |
+| F4 jpeg | | | 0.88 | 0.98 | 0.66 | 0.92 | 0.76 |
+| F2 | high | 0 | 0.99 | 0.98 | 0.80 | 1.00 | 1.00 |
+| F2 jpeg | | | 0.99 | 0.98 | 0.74 | 1.00 | 0.98 |
+| F5 | high | 1 | 0.95 | 1.00 | 0.83 | 0.98 | 0.89 |
+| F5 jpeg | | | 0.93 | 1.00 | 0.78 | 0.98 | 0.86 |
+
+CLI timing (`eval/time_modes.sh`: the `fawkes` command on 1 and on n photos of George_W_Bush, default
+batch size 8, automatic target; seconds per extra face, i.e. (time for n - time for 1) / (n - 1)):
+
+| mode | A100, n = 16 | 8 cores of a Cascade Lake Xeon, n = 3 |
+|---|---|---|
+| low | 0.4 | 18 |
+| subtle | 2.6 to 2.8 | 55 |
+| mid | 3.3 | 53 |
+| high | 5.2 | 76 |
+
+What round 19 says:
+
+- With the matched automatic target `low` protects as well as `high` on the ResNets (0.95 / 1.00
+  against 0.74 / 0.90 with the random target of 2026-09-12) and about half as well as `mid` on the
+  transformers (0.42 / 0.57 / 0.49); it has only ResNet surrogates. ViT-L varies most with the split
+  (0.66 against 0.32).
+- Without the age penalty `low` ages the LFW faces more than the other modes by MiVOLO: mean +0.5 /
+  +2.1 years, 90th percentile +9.6 / +8.3.
+- The clean gallery is within 0.16 of the cloaked gallery in every mode, higher for `subtle`
+  on the ResNets and LVFace-T (0.72 / 0.82 / 0.73 against 0.56 / 0.68 / 0.61) and lower on AdaFace
+  ViT-B in `mid` and `high` (0.68 / 0.81 against 0.78 / 0.85). The 2026-09-13 result, that it does not
+  matter much which side of the classifier the cloaks land on, holds for the current modes.
+- The harness's seconds per photo were close to the CLI for `subtle` and `mid`, but the rounds 14 to
+  16 figures for `high` (8.3 s, quoted in the README until now) came from the old grouping, which ran
+  many small batches; the CLI takes 5.2 s per face on an A100. On 8 CPU cores every mode except
+  `low` takes about a minute per face, not several minutes. The first GPU job timed `low` first, on
+  a cold node, and gave a negative time; the script now makes one untimed run first, and the `low`
+  row and the lower `subtle` figure are that repeat. The other rows and the CPU column are from runs
+  without the warm-up, where the first mode timed is `low`.
+
 ## Final modes of 2026-09-15 (`eval/run_mode.sh`, colour penalty, decision 12)
 
 Same protocol. `mid`: chroma_weight 30, eps 24; `high`: chroma_weight 30, eps 20; `low` unchanged

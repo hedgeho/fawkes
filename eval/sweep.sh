@@ -184,12 +184,19 @@ CONFIGS=(
   "G4|high|--target-strategy far --cloak-arg age_models=genderage,fairface|"
   "G5|high|--target-strategy far --cloak-arg age_models=genderage,fairface --cloak-arg age_weight=6|"
   "G6|mid|--target-strategy far --cloak-arg age_models=fairface|"
+  # Round 19 (2026-11-16): low under the round-17 protocol (automatic target, two splits, JPEG), in
+  # SWEEP_WORKDIR=eval/work/sweep17 next to F0-F5. With SWEEP_EVAL_ARGS=--clean-gallery the eval stage
+  # also gives the clean-gallery numbers for F0-F7.
+  "F6|low|--target-strategy far|jpeg"
+  "F7|low|--target-strategy far --seed 1|jpeg"
 )
 want=("$@")
 # SWEEP_STAGE=all (default): cloak and evaluate each configuration in one job, sharing $WORK.
 # SWEEP_STAGE=cloak: only cloak, each configuration in $WORK/<label> (the GPU part);
 # SWEEP_STAGE=eval: only evaluate those, sharing the embedding cache $WORK/embeddings.sqlite (CPU only).
+# SWEEP_EVAL_ARGS: extra harness arguments for the evaluation runs (e.g. --clean-gallery).
 STAGE="${SWEEP_STAGE:-all}"
+read -r -a EVAL_ARGS <<<"${SWEEP_EVAL_ARGS:-}"
 for cfg in "${CONFIGS[@]}"; do
   IFS='|' read -r label mode extra jpeg <<<"$cfg"
   if [ ${#want[@]} -gt 0 ] && [[ ! " ${want[*]} " == *" $label "* ]]; then continue; fi
@@ -197,7 +204,7 @@ for cfg in "${CONFIGS[@]}"; do
   wd="$WORK"; stage_args=()
   case "$STAGE" in
     cloak) wd="$WORK/$label"; stage_args=(--cloak-only) ;;
-    eval) wd="$WORK/$label"; stage_args=(--skip-cloak --cache "$WORK/embeddings.sqlite") ;;
+    eval) wd="$WORK/$label"; stage_args=(--skip-cloak --cache "$WORK/embeddings.sqlite" "${EVAL_ARGS[@]}") ;;
   esac
   # shellcheck disable=SC2086
   uv run python eval/harness.py --cloaker v2 --mode "$mode" --batch-size 16 --tag "$label" \
@@ -207,7 +214,7 @@ for cfg in "${CONFIGS[@]}"; do
     cache_args=(); [ "$STAGE" = "eval" ] && cache_args=(--cache "$WORK/embeddings.sqlite")
     # shellcheck disable=SC2086
     uv run python eval/harness.py --cloaker v2 --mode "$mode" --tag "$label" --jpeg 75 --skip-cloak \
-      --workdir "$wd" "${EV[@]}" "${cache_args[@]}" $extra
+      --workdir "$wd" "${EV[@]}" "${cache_args[@]}" "${EVAL_ARGS[@]}" $extra
   fi
 done
 echo "=== done $(date)"
